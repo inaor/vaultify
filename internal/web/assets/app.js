@@ -536,8 +536,7 @@ const App = {
     };
     el.innerHTML = this.veeProviders.map(p => {
       const active = this.veeProvider === p.id;
-      const avail = p.available || !p.needs_key;
-      return `<div class="vee-prov-card ${active ? 'active' : ''} ${avail ? 'available' : ''}" onclick="App.selectVeeProvider('${p.id}')" title="${p.name} (${p.model})">${logos[p.id] || '?'}<span style="font-size:.6rem;margin-top:2px">${p.name}</span></div>`;
+      return `<div class="vee-prov-card ${active ? 'active' : ''} ${p.available ? 'available' : ''}" onclick="App.selectVeeProvider('${p.id}')" title="${p.name} (${p.model})">${logos[p.id] || '?'}<span style="font-size:.6rem;margin-top:2px">${p.name}</span></div>`;
     }).join('');
     const label = document.getElementById('veeProvLabel');
     if (label) {
