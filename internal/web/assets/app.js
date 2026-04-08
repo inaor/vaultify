@@ -117,6 +117,7 @@ const App = {
     try { await fetch('/api/scan/stop', { method: 'POST' }); } catch (err) {}
     this.state.status = 'stopped';
     this.updateDashboard(); this.updateButtons(); this.updateNav();
+    if (this.state.findings.length > 0) this.navigate('review');
   },
 
   updateDashboard() {
@@ -236,7 +237,7 @@ const App = {
       if (reportsBadge) reportsBadge.textContent = (sessions || []).length;
       if (!sessions || !sessions.length) { el.innerHTML = '<div class="empty-msg">No scan sessions found.</div>'; return; }
       const thStyle = 'text-align:left;padding:10px 12px;color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)';
-      let html = `<table style="width:100%;border-collapse:collapse;font-size:.88rem"><thead><tr><th style="${thStyle}">Date</th><th style="${thStyle}">Status</th><th style="${thStyle};text-align:center">Findings</th><th style="${thStyle};text-align:center">Remediation</th><th style="${thStyle};text-align:right"></th></tr></thead><tbody>`;
+      let html = `<table style="width:100%;border-collapse:collapse;font-size:.88rem"><thead><tr><th style="${thStyle}">Session</th><th style="${thStyle}">Date</th><th style="${thStyle}">Status</th><th style="${thStyle};text-align:center">Findings</th><th style="${thStyle};text-align:center">Remediation</th><th style="${thStyle};text-align:right"></th></tr></thead><tbody>`;
       sessions.forEach(s => {
         let dt = s.scanned_at || '';
         try { const d = new Date(dt); if (!isNaN(d.getTime())) dt = d.toLocaleString(); } catch(e) {}
@@ -245,7 +246,9 @@ const App = {
         const pct = fc > 0 ? Math.round(100 * rem / fc) : 0;
         const pctColor = pct === 0 ? 'var(--muted)' : pct < 50 ? 'var(--err)' : pct < 100 ? 'var(--warn)' : 'var(--ok)';
         const stColor = s.status === 'complete' ? 'var(--ok)' : s.status === 'running' ? 'var(--accent)' : 'var(--muted)';
+        const sid = (s.id || '').slice(0, 8);
         html += `<tr style="border-bottom:1px solid var(--border);transition:background .15s" onmouseover="this.style.background='rgba(56,189,248,.03)'" onmouseout="this.style.background=''">`;
+        html += `<td style="padding:12px;font-family:monospace;font-size:.78rem;color:var(--accent)">${this.esc(sid)}</td>`;
         html += `<td style="padding:12px">${this.esc(dt)}</td>`;
         html += `<td style="padding:12px;color:${stColor};font-weight:600;font-size:.78rem;text-transform:uppercase">${this.esc(s.status||'complete')}</td>`;
         html += `<td style="padding:12px;text-align:center;font-weight:700;font-size:1.05rem;color:${fc>0?'var(--warn)':'var(--muted)'}">${fc}</td>`;
@@ -260,7 +263,7 @@ const App = {
           html += `<span style="color:var(--muted)">—</span>`;
         }
         html += `</td>`;
-        html += `<td style="padding:12px;text-align:right">${fc > 0 ? `<button class="tb-btn" onclick="App.loadSessionFindings('${this.esc(s.id)}')" style="font-size:.78rem;padding:5px 12px">Review</button>` : ''}</td>`;
+        html += `<td style="padding:12px;text-align:right">${fc > 0 ? `<button class="tb-btn" onclick="App.loadSessionFindings('${this.esc(s.id)}')" style="font-size:.78rem;padding:5px 12px">Review</button>` : '<span style="color:var(--muted)">—</span>'}</td>`;
         html += `</tr>`;
       });
       el.innerHTML = html + '</tbody></table>';
@@ -367,7 +370,18 @@ const App = {
         html += `<span style="color:var(--muted);font-family:monospace;word-break:break-all;flex:1">${this.esc(f.relative_path || f.full_path)}</span>`;
         if (hasSnippet) html += `<span onclick="event.stopPropagation();var s=document.getElementById('snip-${g.hash}-${fi}');s.style.display=s.style.display==='none'?'block':'none'" style="font-size:10px;color:var(--accent);cursor:pointer;padding:2px 8px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);border-radius:4px;flex-shrink:0">snippet</span>`;
         html += `</div>`;
-        if (hasSnippet) html += `<div id="snip-${g.hash}-${fi}" style="display:none;margin:6px 0 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 14px;font-family:monospace;font-size:12px;color:#a8b9cc;white-space:pre-wrap;word-break:break-all;max-height:150px;overflow:auto;line-height:1.5">${this.esc(f.line_snippet)}</div>`;
+        if (hasSnippet) {
+          let snipText = this.esc(f.line_snippet);
+          if (f.redacted_preview) {
+            const parts = f.redacted_preview.split('...');
+            if (parts.length === 2 && parts[0].length >= 3) {
+              const prefix = this.esc(parts[0]);
+              const re = new RegExp(prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[A-Za-z0-9+/=\\-_]{4,}', 'g');
+              snipText = snipText.replace(re, '<span style="background:rgba(248,113,113,.15);color:var(--err);padding:1px 4px;border-radius:3px;font-weight:600">CENSORED_BY_VAULTIFY</span>');
+            }
+          }
+          html += `<div id="snip-${g.hash}-${fi}" style="display:none;margin:6px 0 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 14px;font-family:monospace;font-size:12px;color:#a8b9cc;white-space:pre-wrap;word-break:break-all;max-height:150px;overflow:auto;line-height:1.5">${snipText}</div>`;
+        }
       });
       html += '</td></tr>';
     });
@@ -594,6 +608,7 @@ const App = {
       return;
     }
     if (p.needs_key && p.has_key) {
+      if (this.veeProvider === id) return;
       this.veeProvider = id;
       document.getElementById('veeKeyArea').innerHTML = '';
       this.renderVeeProviders();

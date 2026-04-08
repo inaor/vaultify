@@ -180,7 +180,7 @@ func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 	providers := []veeProviderStatus{
-		{ID: "openai", Name: "OpenAI", NeedsKey: true, Model: "gpt-4.1-nano"},
+		{ID: "openai", Name: "OpenAI", NeedsKey: true, Model: "gpt-5-nano"},
 		{ID: "anthropic", Name: "Anthropic", NeedsKey: true, Model: "claude-3-5-haiku"},
 		{ID: "gemini", Name: "Gemini", NeedsKey: true, Model: "gemini-2.0-flash"},
 		{ID: "ollama", Name: "Ollama", NeedsKey: false, Model: "llama3.2"},
@@ -263,7 +263,7 @@ func (srv *Server) getVeeKey(provider string) string {
 
 func callOpenAI(apiKey, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
 	body := map[string]any{
-		"model": "gpt-4.1-nano",
+		"model": "gpt-5-nano",
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userMessage},

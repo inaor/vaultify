@@ -81,7 +81,7 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 	// ---- audit + version ----
 	mux.HandleFunc("GET /api/audit", srv.handleAuditLog)
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"version": "0.1.1", "build": "go1.26", "os": runtime.GOOS, "arch": runtime.GOARCH})
+		writeJSON(w, http.StatusOK, map[string]string{"version": "0.1.2", "build": "go1.26", "os": runtime.GOOS, "arch": runtime.GOARCH})
 	})
 
 	// ---- Vee AI agent ----
