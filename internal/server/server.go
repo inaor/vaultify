@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"strings"
 
 	"github.com/vaultify/vaultify/internal/scanner"
@@ -17,6 +18,7 @@ type Server struct {
 	sessions *session.Manager
 	hub      *Hub
 	state    scanState
+	auditLog []map[string]string
 }
 
 // NewServer creates a Server with default dependencies.
@@ -75,6 +77,12 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 	// ---- apply / decisions ----
 	mux.HandleFunc("POST /api/apply", srv.handleApply)
 	mux.HandleFunc("POST /api/decisions/save", srv.handleDecisionsSave)
+
+	// ---- audit + version ----
+	mux.HandleFunc("GET /api/audit", srv.handleAuditLog)
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"version": "0.1.1", "build": "go1.26", "os": runtime.GOOS, "arch": runtime.GOARCH})
+	})
 
 	// ---- Vee AI agent ----
 	mux.HandleFunc("POST /api/vee/chat", srv.handleVeeChat)

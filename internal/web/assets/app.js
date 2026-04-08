@@ -80,6 +80,8 @@ const App = {
     document.querySelectorAll('.page').forEach(p => { p.classList.toggle('active', p.id === `page-${this.currentPage}`); });
     if (this.currentPage === 'reports') this.loadSessions();
     if (this.currentPage === 'review') this.renderReview();
+    if (this.currentPage === 'audit') this.loadAuditLog();
+    if (this.currentPage === 'version') this.loadVersion();
   },
 
   updateNav() {
@@ -209,7 +211,7 @@ const App = {
 
   async openVault() {
     const msg = document.getElementById('signInMsg');
-    if (msg) msg.textContent = 'Opening vault...';
+    if (msg) msg.textContent = 'Checking...';
     try {
       const r = await (await fetch('/api/vaults/signin', { method: 'POST' })).json();
       this.opSignedIn = r.signed_in;
@@ -218,10 +220,10 @@ const App = {
         this.loadVeeProviders(true);
       } else {
         const m = document.getElementById('signInMsg');
-        if (m) m.innerHTML = '<span style="color:var(--warn)">Unlock 1Password app first.</span>';
+        if (m) m.innerHTML = `<span style="color:var(--warn)">${this.esc(r.hint || 'Unlock 1Password first.')}</span> <button class="tb-btn" onclick="App.openVault()" style="font-size:.68rem;padding:2px 8px;margin-left:4px">Retry</button>`;
       }
     } catch (e) {
-      if (msg) msg.textContent = 'Request failed.';
+      if (msg) msg.innerHTML = '<span style="color:var(--warn)">Connection failed.</span> <button class="tb-btn" onclick="App.openVault()" style="font-size:.68rem;padding:2px 8px;margin-left:4px">Retry</button>';
     }
   },
 
@@ -508,6 +510,38 @@ const App = {
     body.innerHTML = html;
     footer.innerHTML = '<button class="btn-primary" onclick="App.hideApplyModal()">Done</button>';
     footer.style.display = 'flex';
+  },
+
+  async loadAuditLog() {
+    try {
+      const log = await (await fetch('/api/audit')).json();
+      const el = document.getElementById('auditContent');
+      if (!el) return;
+      if (!log || !log.length) { el.innerHTML = '<div class="empty-msg">No actions recorded yet. Start a scan to generate audit entries.</div>'; return; }
+      const thStyle = 'text-align:left;padding:10px 12px;color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)';
+      let html = `<table style="width:100%;border-collapse:collapse;font-size:.85rem"><thead><tr><th style="${thStyle}">Time</th><th style="${thStyle}">Action</th><th style="${thStyle}">Detail</th></tr></thead><tbody>`;
+      log.slice().reverse().forEach(e => {
+        let dt = e.timestamp || '';
+        try { dt = new Date(dt).toLocaleString(); } catch(x) {}
+        html += `<tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 12px;white-space:nowrap;color:var(--muted);font-size:.82rem">${this.esc(dt)}</td><td style="padding:10px 12px;font-weight:600;font-size:.82rem">${this.esc(e.action)}</td><td style="padding:10px 12px;font-family:monospace;font-size:.78rem;color:var(--muted);word-break:break-all">${this.esc(e.detail)}</td></tr>`;
+      });
+      el.innerHTML = html + '</tbody></table>';
+    } catch (e) {}
+  },
+
+  async loadVersion() {
+    try {
+      const v = await (await fetch('/api/version')).json();
+      const el = document.getElementById('versionContent');
+      if (!el) return;
+      el.innerHTML = `<div style="font-size:.9rem;display:grid;grid-template-columns:140px 1fr;gap:8px 16px;padding:8px 0">
+        <span style="color:var(--muted)">Version</span><span style="font-weight:700;color:var(--accent)">${this.esc(v.version)}</span>
+        <span style="color:var(--muted)">Build</span><span>${this.esc(v.build)}</span>
+        <span style="color:var(--muted)">OS</span><span>${this.esc(v.os)}</span>
+        <span style="color:var(--muted)">Architecture</span><span>${this.esc(v.arch)}</span>
+        <span style="color:var(--muted)">Domain</span><span><a href="https://vaultify.live" target="_blank">vaultify.live</a></span>
+      </div>`;
+    } catch (e) {}
   },
 
   // --- VEE AI AGENT ---

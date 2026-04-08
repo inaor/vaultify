@@ -148,6 +148,7 @@ func (srv *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 	srv.state.mu.Unlock()
 
 	go srv.runScan(ctx, sid, req.Roots)
+	srv.addAuditEntry("scan_started", fmt.Sprintf("session=%s roots=%v", sid, req.Roots))
 
 	writeJSON(w, http.StatusAccepted, scanStartResponse{SessionID: sid})
 }
@@ -173,6 +174,7 @@ func (srv *Server) handleScanStop(w http.ResponseWriter, r *http.Request) {
 			log.Printf("save stopped session: %v", err)
 		}
 	}
+	srv.addAuditEntry("scan_stopped", fmt.Sprintf("session=%s findings=%d", sid, len(findings)))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
@@ -395,6 +397,25 @@ func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string
 // Vault auth and list endpoints
 // ------------------------------------------------------------------
 
+func (srv *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+	srv.state.mu.Lock()
+	log := make([]map[string]string, len(srv.auditLog))
+	copy(log, srv.auditLog)
+	srv.state.mu.Unlock()
+	writeJSON(w, http.StatusOK, log)
+}
+
+func (srv *Server) addAuditEntry(action, detail string) {
+	entry := map[string]string{
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"action":    action,
+		"detail":    detail,
+	}
+	srv.state.mu.Lock()
+	srv.auditLog = append(srv.auditLog, entry)
+	srv.state.mu.Unlock()
+}
+
 func isOpSignedIn() bool {
 	opPath, err := exec.LookPath("op")
 	if err != nil {
@@ -410,17 +431,15 @@ func (srv *Server) handleVaultAuthStatus(w http.ResponseWriter, r *http.Request)
 }
 
 func (srv *Server) handleVaultSignIn(w http.ResponseWriter, r *http.Request) {
-	opPath, err := exec.LookPath("op")
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]bool{"signed_in": false})
+	signedIn := isOpSignedIn()
+	if !signedIn {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"signed_in": false,
+			"hint":      "Open 1Password, unlock it, and enable CLI integration: Settings > Developer > Integrate with 1Password CLI",
+		})
 		return
 	}
-	cmd := exec.Command(opPath, "signin")
-	_ = cmd.Run()
-	checkCmd := exec.Command(opPath, "vault", "list", "--format=json")
-	out, err := checkCmd.Output()
-	signedIn := err == nil && len(out) > 2
-	writeJSON(w, http.StatusOK, map[string]bool{"signed_in": signedIn})
+	writeJSON(w, http.StatusOK, map[string]any{"signed_in": true})
 }
 
 func (srv *Server) handleVaultList1P(w http.ResponseWriter, r *http.Request) {
