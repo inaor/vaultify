@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vaultify</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="sidebar">
+    <div class="brand">Vaultify <span>Credential Remediation</span></div>
+    <nav>
+      <a href="#dashboard" data-page="dashboard" class="active">
+        <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+        Scan
+        <span class="status-inline" id="navStatusPill" style="color:var(--muted)"><span class="spinner" style="display:none"></span><span class="status-text">Ready</span></span>
+      </a>
+      <a href="#review" data-page="review">
+        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        Review &amp; Decide <span class="badge" id="navFindingsBadge">0</span>
+      </a>
+      <a href="#" onclick="event.preventDefault();App.toggleVee()" class="vee-toggle">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-3 12H7v-2h10v2zm0-3H7V9h10v2zm0-3H7V6h10v2z"/></svg>
+        Vee
+      </a>
+      <a href="#reports" data-page="reports">
+        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+        Reports <span class="badge">0</span>
+      </a>
+    </nav>
+  </div>
+
+  <div class="main">
+    <!-- SCAN PAGE -->
+    <div class="page active" id="page-dashboard">
+      <div class="shell">
+        <div class="toolbar">
+          <button class="tb-btn" id="btnStartScan" onclick="App.startScan()" style="font-size:.9rem;padding:9px 18px">
+            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            Start Scan
+          </button>
+          <button class="tb-btn" id="btnStopScan" onclick="App.stopScan()" style="border-color:var(--warn);color:var(--warn);display:none;font-size:.9rem;padding:9px 18px">
+            <svg viewBox="0 0 24 24"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+            Stop
+          </button>
+        </div>
+
+        <div class="gauges">
+          <div class="gauge-card">
+            <div class="ring-wrap">
+              <svg viewBox="0 0 100 100"><circle class="ring-bg"/><circle class="ring-fg" id="progRing" style="stroke:var(--accent);stroke-dasharray:251.2;stroke-dashoffset:251.2"/></svg>
+              <div class="ring-label"><span class="ring-val" id="progVal" style="color:var(--accent)">0%</span><span class="ring-sub">progress</span></div>
+            </div>
+            <div class="gauge-stats">
+              <div class="gauge-title">Scan Progress</div>
+              <div class="gauge-row"><span class="gl">Files scanned</span><span class="gv" id="gFiles">0 / 0</span></div>
+              <div class="gauge-row"><span class="gl">File cap</span><span class="gv" id="gCap">100,000</span></div>
+            </div>
+          </div>
+          <div class="gauge-card">
+            <div class="ring-wrap">
+              <svg viewBox="0 0 100 100"><circle class="ring-bg"/><circle class="ring-fg" id="riskRing" style="stroke:var(--ok);stroke-dasharray:251.2;stroke-dashoffset:251.2"/></svg>
+              <div class="ring-label"><span class="ring-val" id="riskVal" style="color:var(--ok)">0</span><span class="ring-sub">exposure</span></div>
+            </div>
+            <div class="gauge-stats">
+              <div class="gauge-title">Risk Assessment</div>
+              <div class="gauge-row"><span class="gl">Level</span><span class="gv" id="gRiskLabel">Low</span></div>
+              <div class="gauge-row"><span class="gl">Findings</span><span class="gv" id="gHits">0</span></div>
+              <div class="gauge-row"><span class="gl">Plaintext secrets</span><span class="gv" id="gUnique2">0</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="m-card"><div class="m-val" id="mFiles">0</div><div class="m-lbl">Files Scanned</div></div>
+          <div class="m-card"><div class="m-val" id="mHits">0</div><div class="m-lbl">Findings</div></div>
+          <div class="m-card"><div class="m-val" id="gUnique">0</div><div class="m-lbl">Unique Secrets</div></div>
+          <div class="m-card"><div class="m-val" id="mPatterns">0</div><div class="m-lbl">Pattern Types</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Pattern Breakdown <span class="badge" id="patBadge">0 types</span></div>
+          <div id="patterns"><div class="empty-msg">Start a scan to see results.</div></div>
+        </div>
+
+      <div class="card">
+        <div class="card-title">Vault Readiness</div>
+        <div id="vaultStatus"><div class="empty-msg">Detecting vault CLIs...</div></div>
+        <div id="vaultAuth" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"></div>
+      </div>
+
+        <footer>Vaultify v0.1 &mdash; Credential Remediation Toolkit</footer>
+      </div>
+    </div>
+
+    <!-- REVIEW PAGE -->
+    <div class="page" id="page-review">
+      <div class="shell">
+        <div class="toolbar">
+          <input type="search" id="reviewSearch" placeholder="Filter by pattern, path, preview..." oninput="App.reviewPage=0;App.renderReview()" style="flex:1;min-width:200px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 14px;font:inherit;font-size:.9rem">
+          <button class="btn-primary" id="btnApply" onclick="App.showApplyModal()" style="font-size:.9rem;padding:9px 20px">Apply Decisions</button>
+        </div>
+        <div id="reviewStats" style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+        <div id="reviewContent"><div class="empty-msg">Run a scan first, then review findings here.</div></div>
+        <footer>Vaultify v0.1 &mdash; Credential Remediation Toolkit</footer>
+      </div>
+    </div>
+
+    <!-- REPORTS PAGE -->
+    <div class="page" id="page-reports">
+      <div class="shell" style="padding-top:24px">
+        <div class="card">
+          <div class="card-title">Scan History</div>
+          <div id="reportsContent"><div class="empty-msg">No scan sessions found.</div></div>
+        </div>
+        <footer>Vaultify v0.1 &mdash; Credential Remediation Toolkit</footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPLY MODAL -->
+  <div id="applyOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center">
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;max-width:520px;width:94vw;max-height:80vh;overflow-y:auto">
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border)">
+        <h2 style="font-size:1.15rem;font-weight:600;margin:0">Apply Decisions</h2>
+      </div>
+      <div id="applyModalBody" style="padding:20px 24px"></div>
+      <div id="applyModalFooter" style="padding:14px 24px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+        <button class="tb-btn" onclick="App.hideApplyModal()">Cancel</button>
+        <button class="btn-primary" id="btnConfirmApply" onclick="App.confirmApply()">Confirm &amp; Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VEE PANEL -->
+  <div class="vee-panel" id="veePanel">
+    <div class="vee-header">
+      <img src="/assets/vee-avatar.png" class="vee-avatar" alt="Vee">
+      <div class="vee-name">Vee <span>Vaultify Security Agent</span></div>
+      <button class="vee-close" onclick="App.toggleVee()">&times;</button>
+    </div>
+    <div class="vee-providers" id="veeProviders"></div>
+    <div class="vee-prov-label" id="veeProvLabel">Select a provider to start</div>
+    <div id="veeKeyArea"></div>
+    <div class="vee-chat" id="veeChat">
+      <div class="vee-msg vee"><div class="msg-name">Vee</div>Hello! I'm Vee, your Vaultify security assistant. Run a scan and I'll help you understand your findings and prioritise remediation. Choose an AI provider above to get started.</div>
+    </div>
+    <div class="vee-actions">
+      <button class="vee-summary-btn" id="veeSummaryBtn" onclick="App.veeSummary()" disabled style="opacity:.35;cursor:not-allowed">Create Remediation Summary</button>
+    </div>
+    <div class="vee-input-area">
+      <textarea class="vee-input" id="veeInput" rows="1" placeholder="Ask Vee about your findings..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();App.veeSend()}"></textarea>
+      <button class="vee-send" onclick="App.veeSend()">Send</button>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>
