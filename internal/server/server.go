@@ -87,6 +87,7 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 	// ---- Vee AI agent ----
 	mux.HandleFunc("POST /api/vee/chat", srv.handleVeeChat)
 	mux.HandleFunc("GET /api/vee/providers", srv.handleVeeProviders)
+	mux.HandleFunc("POST /api/vee/models", srv.handleVeeModels)
 	mux.HandleFunc("POST /api/vee/key", srv.handleVeeStoreKey)
 
 	// ---- vaults API ----

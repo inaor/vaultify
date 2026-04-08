@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 )
@@ -30,6 +31,7 @@ type veeProviderStatus struct {
 type veeKeyRequest struct {
 	Provider string `json:"provider"`
 	Key      string `json:"key"`
+	Model    string `json:"model"`
 }
 
 const veeSystemPromptTemplate = `You are Vee, Vaultify's security assistant. You speak British English, are concise, professional, and approachable.
@@ -156,15 +158,20 @@ func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 	var responseText string
 	var callErr error
 
+	model := srv.getVeeModel(provider)
 	switch provider {
 	case "openai":
-		responseText, callErr = callOpenAI(apiKey, systemPrompt, req.Message, w, flusher, canFlush)
+		if model == "" || model == "default" { model = "gpt-4.1-mini" }
+		responseText, callErr = callOpenAI(apiKey, model, systemPrompt, req.Message, w, flusher, canFlush)
 	case "anthropic":
-		responseText, callErr = callAnthropic(apiKey, systemPrompt, req.Message, w, flusher, canFlush)
+		if model == "" || model == "default" { model = "claude-3-5-haiku-20241022" }
+		responseText, callErr = callAnthropic(apiKey, model, systemPrompt, req.Message, w, flusher, canFlush)
 	case "gemini":
-		responseText, callErr = callGemini(apiKey, systemPrompt, req.Message, w, flusher, canFlush)
+		if model == "" || model == "default" { model = "gemini-2.0-flash" }
+		responseText, callErr = callGemini(apiKey, model, systemPrompt, req.Message, w, flusher, canFlush)
 	case "ollama":
-		responseText, callErr = callOllama(systemPrompt, req.Message, w, flusher, canFlush)
+		if model == "" || model == "default" { model = "llama3.2" }
+		responseText, callErr = callOllama(model, systemPrompt, req.Message, w, flusher, canFlush)
 	default:
 		httpError(w, http.StatusBadRequest, "unknown provider: %s", provider)
 		return
@@ -180,10 +187,10 @@ func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 	providers := []veeProviderStatus{
-		{ID: "openai", Name: "OpenAI", NeedsKey: true, Model: "gpt-4.1-mini"},
-		{ID: "anthropic", Name: "Anthropic", NeedsKey: true, Model: "claude-3-5-haiku"},
-		{ID: "gemini", Name: "Gemini", NeedsKey: true, Model: "gemini-2.0-flash"},
-		{ID: "ollama", Name: "Ollama", NeedsKey: false, Model: "llama3.2"},
+		{ID: "openai", Name: "OpenAI", NeedsKey: true},
+		{ID: "anthropic", Name: "Anthropic", NeedsKey: true},
+		{ID: "gemini", Name: "Gemini", NeedsKey: true},
+		{ID: "ollama", Name: "Ollama", NeedsKey: false},
 	}
 
 	checkVault := r.URL.Query().Get("check") == "1"
@@ -193,6 +200,9 @@ func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 				key := srv.getVeeKey(providers[i].ID)
 				providers[i].HasKey = key != ""
 				providers[i].Available = providers[i].HasKey
+				if providers[i].HasKey {
+					providers[i].Model = srv.getVeeModel(providers[i].ID)
+				}
 			}
 		} else {
 			providers[i].Available = isOllamaRunning()
@@ -200,6 +210,62 @@ func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, providers)
+}
+
+func (srv *Server) handleVeeModels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Key      string `json:"key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
+		return
+	}
+
+	var models []string
+	switch req.Provider {
+	case "openai":
+		httpReq, _ := http.NewRequest("GET", "https://api.openai.com/v1/models", nil)
+		httpReq.Header.Set("Authorization", "Bearer "+req.Key)
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil || resp.StatusCode != 200 {
+			httpError(w, http.StatusBadRequest, "Invalid API key or cannot reach OpenAI")
+			return
+		}
+		defer resp.Body.Close()
+		var result struct {
+			Data []struct{ ID string `json:"id"` } `json:"data"`
+		}
+		body, _ := io.ReadAll(resp.Body)
+		json.Unmarshal(body, &result)
+		for _, m := range result.Data {
+			if strings.Contains(m.ID, "gpt") {
+				models = append(models, m.ID)
+			}
+		}
+		sort.Strings(models)
+	case "anthropic":
+		models = []string{"claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"}
+	case "gemini":
+		models = []string{"gemini-2.0-flash", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-preview-05-06"}
+	case "ollama":
+		resp, err := http.Get("http://localhost:11434/api/tags")
+		if err == nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			var result struct {
+				Models []struct{ Name string `json:"name"` } `json:"models"`
+			}
+			body, _ := io.ReadAll(resp.Body)
+			json.Unmarshal(body, &result)
+			for _, m := range result.Models {
+				models = append(models, m.Name)
+			}
+		}
+	}
+	if models == nil {
+		models = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"valid": len(models) > 0, "models": models})
 }
 
 func (srv *Server) handleVeeStoreKey(w http.ResponseWriter, r *http.Request) {
@@ -221,18 +287,21 @@ func (srv *Server) handleVeeStoreKey(w http.ResponseWriter, r *http.Request) {
 
 	ensureVaultExists("Vaultify")
 	title := fmt.Sprintf("vee-%s-key", req.Provider)
-	cmd := exec.Command(opPath, "item", "create", "--vault", "Vaultify", "--category", "API Credential", "--title", title, "credential="+req.Key)
+	model := req.Model
+	if model == "" {
+		model = "default"
+	}
+	cmd := exec.Command(opPath, "item", "create", "--vault", "Vaultify", "--category", "API Credential", "--title", title, "credential="+req.Key, "username="+model)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		existing := exec.Command(opPath, "item", "edit", title, "--vault", "Vaultify", "credential="+req.Key)
+		existing := exec.Command(opPath, "item", "edit", title, "--vault", "Vaultify", "credential="+req.Key, "username="+model)
 		out2, err2 := existing.CombinedOutput()
 		if err2 != nil {
 			httpError(w, http.StatusInternalServerError, "failed to store key: %s / %s", strings.TrimSpace(string(out)), strings.TrimSpace(string(out2)))
 			return
 		}
-		_ = out2
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"stored": true})
+	writeJSON(w, http.StatusOK, map[string]any{"stored": true, "model": model})
 }
 
 func isOllamaRunning() bool {
@@ -259,11 +328,25 @@ func (srv *Server) getVeeKey(provider string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func (srv *Server) getVeeModel(provider string) string {
+	opPath, err := exec.LookPath("op")
+	if err != nil {
+		return ""
+	}
+	ref := fmt.Sprintf("op://Vaultify/vee-%s-key/username", provider)
+	cmd := exec.Command(opPath, "read", ref)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // --- LLM Provider Implementations ---
 
-func callOpenAI(apiKey, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
+func callOpenAI(apiKey, model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
 	body := map[string]any{
-		"model": "gpt-4.1-mini",
+		"model": model,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userMessage},
@@ -305,9 +388,9 @@ func callOpenAI(apiKey, systemPrompt, userMessage string, w http.ResponseWriter,
 	return "", fmt.Errorf("no response from OpenAI")
 }
 
-func callAnthropic(apiKey, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
+func callAnthropic(apiKey, model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
 	body := map[string]any{
-		"model":      "claude-3-5-haiku-20241022",
+		"model":      model,
 		"max_tokens": 2048,
 		"system":     systemPrompt,
 		"messages":   []map[string]string{{"role": "user", "content": userMessage}},
@@ -346,8 +429,8 @@ func callAnthropic(apiKey, systemPrompt, userMessage string, w http.ResponseWrit
 	return "", fmt.Errorf("no response from Anthropic")
 }
 
-func callGemini(apiKey, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+func callGemini(apiKey, model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
 	body := map[string]any{
 		"system_instruction": map[string]any{"parts": []map[string]string{{"text": systemPrompt}}},
 		"contents":           []map[string]any{{"parts": []map[string]string{{"text": userMessage}}}},
@@ -388,9 +471,9 @@ func callGemini(apiKey, systemPrompt, userMessage string, w http.ResponseWriter,
 	return "", fmt.Errorf("no response from Gemini")
 }
 
-func callOllama(systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
+func callOllama(model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
 	body := map[string]any{
-		"model":  "llama3.2",
+		"model":  model,
 		"prompt": systemPrompt + "\n\nUser: " + userMessage + "\n\nVee:",
 		"stream": false,
 	}

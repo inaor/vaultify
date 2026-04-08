@@ -589,7 +589,7 @@ const App = {
     const label = document.getElementById('veeProvLabel');
     if (label) {
       const active = this.veeProviders.find(p => p.id === this.veeProvider);
-      label.textContent = active ? `Using ${active.name} ${active.model}` : 'Select a provider to start';
+      label.textContent = active ? `Using ${active.name}${active.model ? ' · ' + active.model : ''}` : 'Select a provider to start';
     }
   },
 
@@ -599,12 +599,12 @@ const App = {
     if (p.needs_key && !p.has_key) {
       await this.loadVeeProviders(true);
       const updated = this.veeProviders.find(x => x.id === id);
-      if (updated && updated.has_key) { p.has_key = true; p.available = true; }
+      if (updated && updated.has_key) { p.has_key = true; p.available = true; p.model = updated.model; }
     }
     if (p.needs_key && !p.has_key) {
       const area = document.getElementById('veeKeyArea');
-      area.innerHTML = `<div class="vee-key-input"><input type="password" id="veeKeyInput" placeholder="${p.name} API key"><button class="vee-send" onclick="App.storeVeeKey('${id}')" style="padding:6px 12px;font-size:.78rem">Store in Vault</button></div>`;
-      this.addVeeMsg('vee', `To use ${p.name}, paste your API key above. It'll be stored securely in your Vaultify vault — dogfooding our own product!`);
+      area.innerHTML = `<div style="padding:8px 20px"><input type="password" id="veeKeyInput" placeholder="${p.name} API key" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.82rem;margin-bottom:6px"><button class="vee-send" onclick="App.validateVeeKey('${id}')" style="width:100%;padding:8px;font-size:.82rem">Validate Key</button></div>`;
+      this.addVeeMsg('vee', `Paste your ${p.name} API key above. I'll check which models are available, then you choose one.`);
       return;
     }
     if (p.needs_key && p.has_key) {
@@ -625,25 +625,56 @@ const App = {
     this.addVeeMsg('vee', `Switched to ${p.name} (${p.model}). How can I help with your scan findings?`);
   },
 
-  async storeVeeKey(provider) {
+  async validateVeeKey(provider) {
     const input = document.getElementById('veeKeyInput');
     if (!input || !input.value.trim()) return;
+    const key = input.value.trim();
+    const area = document.getElementById('veeKeyArea');
+    area.innerHTML = '<div style="padding:12px 20px;color:var(--muted);font-size:.82rem">Validating key and fetching models...</div>';
+
+    try {
+      const r = await (await fetch('/api/vee/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, key })
+      })).json();
+
+      if (!r.valid || !r.models || !r.models.length) {
+        area.innerHTML = `<div style="padding:8px 20px"><div style="color:var(--err);font-size:.82rem;margin-bottom:8px">Invalid key or no models available.</div><input type="password" id="veeKeyInput" value="${this.esc(key)}" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.82rem;margin-bottom:6px"><button class="vee-send" onclick="App.validateVeeKey('${provider}')" style="width:100%;padding:8px;font-size:.82rem">Try Again</button></div>`;
+        return;
+      }
+
+      this._pendingVeeKey = key;
+      let opts = r.models.map(m => `<option value="${this.esc(m)}">${this.esc(m)}</option>`).join('');
+      area.innerHTML = `<div style="padding:8px 20px"><div style="color:var(--ok);font-size:.82rem;margin-bottom:8px">✓ Key valid — ${r.models.length} model(s) available</div><select id="veeModelSelect" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.82rem;margin-bottom:6px">${opts}</select><button class="vee-send" onclick="App.storeVeeKey('${provider}')" style="width:100%;padding:8px;font-size:.82rem">Store Key &amp; Model in Vault</button></div>`;
+    } catch (e) {
+      area.innerHTML = `<div style="padding:8px 20px;color:var(--err);font-size:.82rem">Validation failed. Check your connection.</div>`;
+    }
+  },
+
+  async storeVeeKey(provider) {
+    const modelSelect = document.getElementById('veeModelSelect');
+    const model = modelSelect ? modelSelect.value : '';
+    const key = this._pendingVeeKey || '';
+    if (!key) return;
+
     try {
       const r = await (await fetch('/api/vee/key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, key: input.value.trim() })
+        body: JSON.stringify({ provider, key, model })
       })).json();
       if (r.stored) {
         document.getElementById('veeKeyArea').innerHTML = '';
+        this._pendingVeeKey = '';
         this.veeProvider = provider;
         const p = this.veeProviders.find(x => x.id === provider);
-        if (p) p.has_key = true;
+        if (p) { p.has_key = true; p.model = r.model || model; }
         this.renderVeeProviders();
-        this.addVeeMsg('vee', `Key stored in vault. Using ${p ? p.name : provider} now. How can I help?`);
+        this.addVeeMsg('vee', `Key and model stored in vault. Using ${p ? p.name : provider} (${r.model || model}). How can I help?`);
       }
     } catch (e) {
-      this.addVeeMsg('vee', 'Failed to store key. Make sure your vault is open first (click "Open Vault" in the Scan tab).');
+      this.addVeeMsg('vee', 'Failed to store key. Make sure your vault is open first.');
     }
   },
 
