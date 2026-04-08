@@ -12,6 +12,7 @@ const App = {
     this.navigate(window.location.hash.slice(1) || 'dashboard');
     this.loadVaults();
     this.loadSessions();
+    this.loadVeeProviders();
   },
 
   connectWebSocket() {
@@ -195,9 +196,9 @@ const App = {
         extra = ` <span style="font-size:.72rem;color:var(--muted);font-family:monospace">${this.esc(v.install_cmd || '')}</span>`;
       } else if (v.cli === 'op') {
         if (this.opSignedIn) {
-          extra = ' <span style="font-size:.72rem;color:var(--ok);font-weight:600">signed in</span>';
+          extra = ' <span style="font-size:.72rem;color:var(--ok);font-weight:600">vault open</span>';
         } else {
-          extra = ' <button class="tb-btn" onclick="event.stopPropagation();App.signIn1Password()" style="font-size:.72rem;padding:3px 10px;margin-left:8px;border-color:var(--ok);color:var(--ok)">Sign in</button><span id="signInMsg" style="font-size:.72rem;color:var(--muted);margin-left:6px"></span>';
+          extra = ' <button class="tb-btn" onclick="event.stopPropagation();App.openVault()" style="font-size:.72rem;padding:3px 10px;margin-left:8px;border-color:var(--ok);color:var(--ok)">Open Vault</button><span id="signInMsg" style="font-size:.72rem;color:var(--muted);margin-left:6px"></span>';
         }
       }
       return `<div class="vault-row">${check} <strong style="font-size:.84rem">${this.esc(v.name)}</strong>${extra}</div>`;
@@ -206,16 +207,18 @@ const App = {
     if (authEl) authEl.innerHTML = '';
   },
 
-  async signIn1Password() {
+  async openVault() {
     const msg = document.getElementById('signInMsg');
-    if (msg) msg.textContent = 'Signing in...';
+    if (msg) msg.textContent = 'Opening vault...';
     try {
       const r = await (await fetch('/api/vaults/signin', { method: 'POST' })).json();
       this.opSignedIn = r.signed_in;
       this.renderVaultStatus();
-      if (!r.signed_in && msg) {
+      if (r.signed_in) {
+        this.loadVeeProviders(true);
+      } else {
         const m = document.getElementById('signInMsg');
-        if (m) m.innerHTML = '<span style="color:var(--warn)">Failed. Unlock 1Password first.</span>';
+        if (m) m.innerHTML = '<span style="color:var(--warn)">Unlock 1Password app first.</span>';
       }
     } catch (e) {
       if (msg) msg.textContent = 'Request failed.';
@@ -401,7 +404,7 @@ const App = {
       if (!op || !op.installed) {
         vaultHtml = `<div style="background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);border-radius:8px;padding:10px 14px;color:var(--err);font-size:.85rem;margin-top:12px">1Password CLI not installed. Install: <code>winget install -e --id AgileBits.1Password.CLI</code></div>`;
       } else if (!authOk) {
-        vaultHtml = `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:10px 14px;color:var(--warn);font-size:.85rem;margin-top:12px">1Password not signed in. Run <code>op signin</code> in a terminal first, then try again.</div>`;
+        vaultHtml = `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:10px 14px;color:var(--warn);font-size:.85rem;margin-top:12px">Vault not open. Click "Open Vault" in the Scan tab first, then try again.</div>`;
       } else {
         let opts = '<option value="__new__">+ Create new vault</option>';
         try {
@@ -512,16 +515,12 @@ const App = {
   veeProvider: '',
   veeProviders: [],
 
-  toggleVee() {
-    this.veeOpen = !this.veeOpen;
-    document.getElementById('veePanel').classList.toggle('open', this.veeOpen);
-    document.body.classList.toggle('vee-open', this.veeOpen);
-    if (this.veeOpen && !this.veeProviders.length) this.loadVeeProviders();
-  },
+  toggleVee() {},
 
-  async loadVeeProviders() {
+  async loadVeeProviders(checkVault) {
     try {
-      this.veeProviders = await (await fetch('/api/vee/providers')).json();
+      const url = checkVault ? '/api/vee/providers?check=1' : '/api/vee/providers';
+      this.veeProviders = await (await fetch(url)).json();
       this.renderVeeProviders();
     } catch (e) { console.warn('Vee providers failed', e); }
   },
@@ -530,14 +529,15 @@ const App = {
     const el = document.getElementById('veeProviders');
     if (!el) return;
     const logos = {
-      openai: `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.37a5.97 5.97 0 00-.52-4.93 6.05 6.05 0 00-6.54-2.9A5.97 5.97 0 0010.7 0 6.04 6.04 0 004.38 3.46a5.97 5.97 0 00-3.99 2.9 6.04 6.04 0 00.74 7.07 5.97 5.97 0 00.52 4.93 6.05 6.05 0 006.54 2.9A5.97 5.97 0 0013.3 24a6.04 6.04 0 006.32-3.46 5.97 5.97 0 003.99-2.9 6.04 6.04 0 00-.74-7.07zM13.3 22.43a4.48 4.48 0 01-2.88-1.05l.14-.08 4.79-2.77a.78.78 0 00.39-.67v-6.77l2.02 1.17a.07.07 0 01.04.05v5.6a4.49 4.49 0 01-4.5 4.52z"/></svg>`,
-      anthropic: `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M13.83 1.5h3.21L24 22.5h-3.21l-1.75-5.4h-6.6l-.6 1.86h-3.2l4.8-14.7zm1.56 4.65L13.2 13.5h4.38l-2.19-7.35zM7.2 1.5H4L0 22.5h3.21l1.5-7.88L9 1.5H7.2z"/></svg>`,
-      gemini: `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0a12 12 0 100 24 12 12 0 000-24zm0 2a10 10 0 017.07 2.93A13.4 13.4 0 0012 8.5a13.4 13.4 0 00-7.07-3.57A10 10 0 0112 2zm0 20a10 10 0 01-7.07-2.93A13.4 13.4 0 0012 15.5a13.4 13.4 0 007.07 3.57A10 10 0 0112 22z"/></svg>`,
-      ollama: `<span style="font-size:1.2rem">🦙</span>`
+      openai: `<svg width="24" height="24" viewBox="0 0 320 320" fill="currentColor"><path d="M297.06 130.97c7.26-21.79 4.76-45.66-6.85-65.48-17.46-30.4-52.56-46.04-86.84-38.68C186.64 7.04 163.42-3.02 140.2.62c-34.87 5.43-61.94 34.34-67.05 69.44C49.82 75.87 30.1 93.12 22.3 116.7c-11.73 35.35 1.27 74.07 31.63 95.32-7.26 21.79-4.76 45.66 6.85 65.48 17.46 30.4 52.56 46.04 86.84 38.68 16.73 19.77 39.95 29.83 63.17 26.19 34.87-5.43 61.94-34.34 67.05-69.44 23.33-5.81 43.05-23.06 50.85-46.64 11.73-35.35-1.27-74.07-31.63-95.32zM160.06 296.3c-15.61.02-30.85-5.13-43.23-14.58l2.16-1.23 71.7-41.41c3.68-2.09 5.94-5.98 5.92-10.19V138.36l30.31 17.5c.33.17.57.48.63.84v83.77c-.08 30.66-24.88 55.5-55.5 55.83h.01z"/></svg>`,
+      anthropic: `<svg width="24" height="24" viewBox="0 0 256 176" fill="#D97757"><path d="M147.49 0l60.11 176h-41.2l-60.1-176h41.19zM66.98 0H25.8L86 176h41.19L66.98 0z"/></svg>`,
+      gemini: `<svg width="24" height="24" viewBox="0 0 28 28"><defs><linearGradient id="gg" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#4285F4"/><stop offset=".5" stop-color="#9B72CB"/><stop offset="1" stop-color="#D96570"/></linearGradient></defs><path d="M14 28C14 21.4 8.8 14 0 14c8.8 0 14-7.4 14-14 0 8.8 5.2 14 14 14-8.8 0-14 7.4-14 14z" fill="url(#gg)"/></svg>`,
+      ollama: `<span style="font-size:1.3rem">🦙</span>`
     };
     el.innerHTML = this.veeProviders.map(p => {
       const active = this.veeProvider === p.id;
-      return `<div class="vee-prov-card ${active ? 'active' : ''} available" onclick="App.selectVeeProvider('${p.id}')" title="${p.name} (${p.model})">${logos[p.id] || '?'}<span style="font-size:.6rem;margin-top:2px">${p.name}</span></div>`;
+      const avail = p.available || !p.needs_key;
+      return `<div class="vee-prov-card ${active ? 'active' : ''} ${avail ? 'available' : ''}" onclick="App.selectVeeProvider('${p.id}')" title="${p.name} (${p.model})">${logos[p.id] || '?'}<span style="font-size:.6rem;margin-top:2px">${p.name}</span></div>`;
     }).join('');
     const label = document.getElementById('veeProvLabel');
     if (label) {
@@ -546,13 +546,25 @@ const App = {
     }
   },
 
-  selectVeeProvider(id) {
+  async selectVeeProvider(id) {
     const p = this.veeProviders.find(x => x.id === id);
     if (!p) return;
-    if (p.needs_key) {
+    if (p.needs_key && !p.has_key) {
+      await this.loadVeeProviders(true);
+      const updated = this.veeProviders.find(x => x.id === id);
+      if (updated && updated.has_key) { p.has_key = true; p.available = true; }
+    }
+    if (p.needs_key && !p.has_key) {
       const area = document.getElementById('veeKeyArea');
       area.innerHTML = `<div class="vee-key-input"><input type="password" id="veeKeyInput" placeholder="${p.name} API key"><button class="vee-send" onclick="App.storeVeeKey('${id}')" style="padding:6px 12px;font-size:.78rem">Store in Vault</button></div>`;
       this.addVeeMsg('vee', `To use ${p.name}, paste your API key above. It'll be stored securely in your Vaultify vault — dogfooding our own product!`);
+      return;
+    }
+    if (p.needs_key && p.has_key) {
+      this.veeProvider = id;
+      document.getElementById('veeKeyArea').innerHTML = '';
+      this.renderVeeProviders();
+      this.addVeeMsg('vee', `Using ${p.name} (${p.model}). Key loaded from your Vaultify vault. How can I help?`);
       return;
     }
     if (!p.available) {
@@ -583,7 +595,7 @@ const App = {
         this.addVeeMsg('vee', `Key stored in vault. Using ${p ? p.name : provider} now. How can I help?`);
       }
     } catch (e) {
-      this.addVeeMsg('vee', 'Failed to store key. Make sure 1Password is signed in.');
+      this.addVeeMsg('vee', 'Failed to store key. Make sure your vault is open first (click "Open Vault" in the Scan tab).');
     }
   },
 

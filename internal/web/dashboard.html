@@ -19,10 +19,6 @@
         <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
         Review &amp; Decide <span class="badge" id="navFindingsBadge">0</span>
       </a>
-      <a href="#" onclick="event.preventDefault();App.toggleVee()" class="vee-toggle">
-        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-3 12H7v-2h10v2zm0-3H7V9h10v2zm0-3H7V6h10v2z"/></svg>
-        Vee
-      </a>
       <a href="#reports" data-page="reports">
         <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
         Reports <span class="badge">0</span>
@@ -133,11 +129,10 @@
   </div>
 
   <!-- VEE PANEL -->
-  <div class="vee-panel" id="veePanel">
+  <div class="vee-panel open" id="veePanel">
     <div class="vee-header">
       <img src="/assets/vee-avatar.png" class="vee-avatar" alt="Vee">
       <div class="vee-name">Vee <span>Vaultify Security Agent</span></div>
-      <button class="vee-close" onclick="App.toggleVee()">&times;</button>
     </div>
     <div class="vee-providers" id="veeProviders"></div>
     <div class="vee-prov-label" id="veeProvLabel">Select a provider to start</div>

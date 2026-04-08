@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type veeChatRequest struct {
@@ -116,6 +117,15 @@ func min(a, b int) int {
 	return b
 }
 
+const veeNoScanPrompt = `You are Vee, Vaultify's security assistant. You speak British English, are concise, professional, and approachable.
+No scan has been run yet. You can:
+- Explain what Vaultify does (scans for plaintext secrets, helps vault or remove them)
+- Guide the user to click "Start Scan" on the Scan tab
+- Answer general questions about secrets management, credential hygiene, and vault best practices
+- Explain what each pattern type detects (AWS keys, GitHub tokens, Slack tokens, etc.)
+
+Keep responses concise. Use UK English spelling.`
+
 func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 	var req veeChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -125,8 +135,7 @@ func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 
 	systemPrompt, err := srv.buildVeeContext(req.SessionID)
 	if err != nil {
-		httpError(w, http.StatusBadRequest, "context error: %v", err)
-		return
+		systemPrompt = veeNoScanPrompt
 	}
 
 	provider := req.Provider
@@ -171,23 +180,22 @@ func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 	providers := []veeProviderStatus{
-		{ID: "openai", Name: "OpenAI", NeedsKey: true, Model: "gpt-4o-mini"},
+		{ID: "openai", Name: "OpenAI", NeedsKey: true, Model: "gpt-4.1-nano"},
 		{ID: "anthropic", Name: "Anthropic", NeedsKey: true, Model: "claude-3-5-haiku"},
 		{ID: "gemini", Name: "Gemini", NeedsKey: true, Model: "gemini-2.0-flash"},
 		{ID: "ollama", Name: "Ollama", NeedsKey: false, Model: "llama3.2"},
 	}
 
+	checkVault := r.URL.Query().Get("check") == "1"
 	for i := range providers {
 		if providers[i].NeedsKey {
-			providers[i].Available = true
-			providers[i].HasKey = false
-		} else {
-			client := &http.Client{Timeout: 1e9}
-			resp, err := client.Get("http://localhost:11434/api/tags")
-			providers[i].Available = err == nil && resp != nil && resp.StatusCode == 200
-			if resp != nil {
-				resp.Body.Close()
+			if checkVault {
+				key := srv.getVeeKey(providers[i].ID)
+				providers[i].HasKey = key != ""
+				providers[i].Available = providers[i].HasKey
 			}
+		} else {
+			providers[i].Available = isOllamaRunning()
 		}
 	}
 
@@ -227,6 +235,16 @@ func (srv *Server) handleVeeStoreKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"stored": true})
 }
 
+func isOllamaRunning() bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get("http://localhost:11434/api/tags")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
 func (srv *Server) getVeeKey(provider string) string {
 	opPath, err := exec.LookPath("op")
 	if err != nil {
@@ -245,7 +263,7 @@ func (srv *Server) getVeeKey(provider string) string {
 
 func callOpenAI(apiKey, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
 	body := map[string]any{
-		"model": "gpt-4o-mini",
+		"model": "gpt-4.1-nano",
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userMessage},

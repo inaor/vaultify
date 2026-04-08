@@ -395,16 +395,18 @@ func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string
 // Vault auth and list endpoints
 // ------------------------------------------------------------------
 
-func (srv *Server) handleVaultAuthStatus(w http.ResponseWriter, r *http.Request) {
-	signedIn := false
+func isOpSignedIn() bool {
 	opPath, err := exec.LookPath("op")
-	if err == nil {
-		cmd := exec.Command(opPath, "vault", "list", "--format=json")
-		if out, err := cmd.Output(); err == nil && len(out) > 2 {
-			signedIn = true
-		}
+	if err != nil {
+		return false
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"onepassword_signed_in": signedIn})
+	cmd := exec.Command(opPath, "vault", "list", "--format=json")
+	out, err := cmd.Output()
+	return err == nil && len(out) > 2
+}
+
+func (srv *Server) handleVaultAuthStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"onepassword_signed_in": isOpSignedIn()})
 }
 
 func (srv *Server) handleVaultSignIn(w http.ResponseWriter, r *http.Request) {
