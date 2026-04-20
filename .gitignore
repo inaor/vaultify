@@ -1,8 +1,11 @@
 dist/
 *.exe
+*.exe~
 *.bak
 .env
 op.env
 *.pem
 *.key
 sessions/
+.cursor/
+__debug_bin*

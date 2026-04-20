@@ -1,0 +1,135 @@
+# Build multi-platform binaries and publish a GitHub Release when you push a tag: v1.2.3
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            suffix: .exe
+          - goos: darwin
+            goarch: amd64
+            suffix: ''
+          - goos: darwin
+            goarch: arm64
+            suffix: ''
+          - goos: linux
+            goarch: amd64
+            suffix: ''
+          - goos: linux
+            goarch: arm64
+            suffix: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        id: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUT="vaultify_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.suffix }}"
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          go build -trimpath -buildvcs=false \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "$OUT" ./cmd/vaultify
+          if [ "${{ matrix.goos }}" != "windows" ]; then chmod +x "$OUT"; fi
+          ls -la "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.build.outputs.out }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f \( -name 'vaultify_*' -o -name 'vaultify_*.exe' \) -print -exec cp -f {} dist/ \;
+          if [ ! "$(find dist -maxdepth 1 -type f -name 'vaultify_*' | wc -l)" -ge 1 ]; then
+            echo "::error::No vaultify_* binaries found under artifacts/"
+            find artifacts -type f || true
+            exit 1
+          fi
+          for f in dist/vaultify_*; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *.exe) ;;
+              *) chmod +x "$f" ;;
+            esac
+          done
+          cp -f LICENSE dist/LICENSE
+          ( cd dist && sha256sum vaultify_* > SHA256SUMS )
+          echo "---- SHA256SUMS ----"
+          cat dist/SHA256SUMS
+          ls -la dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          append_body: true
+          body: |
+            ## Downloads
+
+            | Asset | Platform |
+            |-------|----------|
+            | `vaultify_*_windows_amd64.exe` | Windows (x86_64) |
+            | `vaultify_*_darwin_amd64` | macOS Intel |
+            | `vaultify_*_darwin_arm64` | macOS Apple Silicon |
+            | `vaultify_*_linux_amd64` | Linux (x86_64) |
+            | `vaultify_*_linux_arm64` | Linux (ARM64) |
+            | `SHA256SUMS` | SHA-256 hashes for the binaries above |
+            | `LICENSE` | MIT |
+
+            ### Verify checksums
+
+            Download `SHA256SUMS` next to your binary, then:
+
+            - **Linux:** `sha256sum -c SHA256SUMS --ignore-missing`
+            - **macOS:** `shasum -a 256 -c SHA256SUMS` (only if you downloaded every file listed in `SHA256SUMS`, or check one file: `shasum -a 256 vaultify_*` and compare to the file)
+            - **Windows (PowerShell):** `Get-FileHash .\vaultify_*_windows_amd64.exe -Algorithm SHA256` and compare to the line in `SHA256SUMS`
+
+            ### Notes
+
+            - Run `./vaultify` (or `vaultify.exe` on Windows). The dashboard opens at `http://localhost:9471` by default.
+            - macOS binaries are **not** Apple-notarized; you may need to allow the app under **System Settings → Privacy & Security** the first time.
+            - 1Password integration requires the [1Password CLI](https://developer.1password.com/docs/cli) (`op`) where you use vault features.
+          files: |
+            dist/vaultify_*
+            dist/SHA256SUMS
+            dist/LICENSE
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

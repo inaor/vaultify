@@ -3,20 +3,34 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vaultify/vaultify/internal/scanner"
+	"github.com/vaultify/vaultify/internal/session"
 )
 
+type veeChatContext struct {
+	CurrentPage    string         `json:"current_page"`
+	Decisions      map[string]int `json:"decisions"`
+	TotalFindings  int            `json:"total_findings"`
+	ScanStatus     string         `json:"scan_status"`
+}
+
 type veeChatRequest struct {
-	SessionID string `json:"session_id"`
-	Message   string `json:"message"`
-	Provider  string `json:"provider"`
+	SessionID string          `json:"session_id"`
+	Message   string          `json:"message"`
+	Provider  string          `json:"provider"`
+	Context   *veeChatContext `json:"context,omitempty"`
 }
 
 type veeProviderStatus struct {
@@ -43,73 +57,146 @@ FINDINGS (%d total, %d unique secrets):
 PATTERN SUMMARY:
 %s
 
+USER CONTEXT:
+%s
+
 You help the user:
-- Understand which findings are genuine risks vs false positives (e.g. test fixtures, example keys)
+- Understand which findings are genuine risks vs false positives
 - Prioritise remediation (critical severity first)
-- Suggest whether to Vaultify (store in vault), Remove from code, or Dismiss each finding
+- Suggest whether to Vaultify (store in vault), Remove from code, or send false positives to the Junkyard (excluded on future scans)
 - Generate executive summaries for governance reporting
 - Explain what each pattern type means in plain language
+- ACTIVELY detect and flag likely false positives. Common FP indicators:
+  * Findings in AppData, Cache, browser profiles, or third-party app directories
+  * Values containing code identifiers like __eventId__, callback, handler, className
+  * Low-entropy matches (repetitive patterns, English words)
+  * Example/placeholder keys (containing "EXAMPLE", "test", "sample", "placeholder")
+  * Matches in SDK test fixtures or documentation files
 
 RULES:
-- Never reveal actual secret values -- only use redacted previews
+- NEVER output any string that looks like a credential, API key, token, or secret -- even if partially visible in the preview
+- Always refer to secrets by their pattern type and file location, e.g. "the AWS key in backend/.env line 3"
+- If a user asks you to show a key value, decline and explain why
+- The "preview" field is already redacted -- do not attempt to reconstruct or guess the full value
 - Never access the filesystem or any data outside this session
 - Only discuss findings from this session
 - If asked about other data or sessions, decline politely
 - Keep responses concise -- bullet points over paragraphs
-- Use UK English spelling`
+- Use UK English spelling
+- When the user is on the Review & Decide page, reference specific findings and suggest actions
+- When the user is on the Reports page, focus on trends and governance
+- When asked for a summary, always include a "Likely False Positives" section`
 
-func (srv *Server) buildVeeContext(sessionID string) (string, error) {
+func (srv *Server) buildVeeContext(sessionID string, ctx *veeChatContext) (string, error) {
 	if sessionID == "" {
 		srv.state.mu.Lock()
 		sessionID = srv.state.SessionID
 		srv.state.mu.Unlock()
 	}
 	if sessionID == "" {
+		if sessions, err := srv.sessions.List(); err == nil && len(sessions) > 0 {
+			sessionID = sessions[0].ID
+		}
+	}
+	if sessionID == "" {
 		return "", fmt.Errorf("no active session")
 	}
 
-	s, err := srv.sessions.Get(sessionID)
-	if err != nil {
-		srv.state.mu.Lock()
-		findings := srv.state.Findings
-		srv.state.mu.Unlock()
-		if len(findings) == 0 {
-			return "", fmt.Errorf("session not found and no active scan")
+	userCtx := "No additional context."
+	if ctx != nil {
+		parts := []string{}
+		if ctx.CurrentPage != "" {
+			parts = append(parts, fmt.Sprintf("User is viewing: %s page", ctx.CurrentPage))
 		}
+		if ctx.ScanStatus != "" {
+			parts = append(parts, fmt.Sprintf("Scan status: %s", ctx.ScanStatus))
+		}
+		if ctx.Decisions != nil {
+			gy := ctx.Decisions["graveyard"]
+			if ctx.Decisions["dismiss"] > 0 {
+				gy += ctx.Decisions["dismiss"]
+			}
+			parts = append(parts, fmt.Sprintf("Decisions made: vault=%d, remove=%d, junkyard=%d, pending=%d",
+				ctx.Decisions["vault"], ctx.Decisions["remove"], gy, ctx.Decisions["pending"]))
+		}
+		if len(parts) > 0 {
+			userCtx = strings.Join(parts, "\n")
+		}
+	}
+
+	// Also load decisions from disk if available
+	decCtx := ""
+	if sessionID != "" && session.IsValidID(sessionID) {
+		decPath := filepath.Join(srv.sessions.Dir(sessionID), "decisions.json")
+		if data, err := os.ReadFile(decPath); err == nil {
+			decCtx = "\n\nSAVED DECISIONS:\n" + string(data[:min(len(data), 2000)])
+		}
+	}
+	userCtx += decCtx
+
+	type compactFinding struct {
+		Pattern  string `json:"pattern"`
+		Severity string `json:"severity"`
+		Preview  string `json:"preview"`
+		Path     string `json:"path"`
+		Line     int    `json:"line"`
+	}
+
+	buildFromFindings := func(findings []scanner.Finding) string {
 		patMap := map[string]int{}
 		uniqueHashes := map[string]bool{}
 		for _, f := range findings {
 			patMap[f.PatternID]++
 			uniqueHashes[f.MatchSHA256] = true
 		}
-		findingsJSON, _ := json.MarshalIndent(findings[:min(len(findings), 50)], "", "  ")
-		patSummary := ""
-		for k, v := range patMap {
-			patSummary += fmt.Sprintf("  %s: %d\n", k, v)
+
+		maxFindings := 60
+		subset := findings
+		if len(subset) > maxFindings {
+			subset = subset[:maxFindings]
 		}
-		return fmt.Sprintf(veeSystemPromptTemplate, sessionID, len(findings), len(uniqueHashes), string(findingsJSON), patSummary), nil
+		compact := make([]compactFinding, len(subset))
+		for i, f := range subset {
+			prev := f.RedactedPreview
+			if len(prev) > 8 {
+				prev = prev[:4] + "..." + prev[len(prev)-2:]
+			}
+			compact[i] = compactFinding{
+				Pattern:  f.PatternID,
+				Severity: f.Severity,
+				Preview:  prev,
+				Path:     f.RelativePath,
+				Line:     f.LineNumber,
+			}
+		}
+		findingsJSON, _ := json.Marshal(compact)
+
+		keys := make([]string, 0, len(patMap))
+		for k := range patMap {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		patSummary := ""
+		for _, k := range keys {
+			patSummary += fmt.Sprintf("  %s: %d\n", k, patMap[k])
+		}
+
+		return fmt.Sprintf(veeSystemPromptTemplate, sessionID, len(findings), len(uniqueHashes), string(findingsJSON), patSummary, userCtx)
 	}
 
-	patMap := map[string]int{}
-	uniqueHashes := map[string]bool{}
-	for _, f := range s.Findings {
-		patMap[f.PatternID]++
-		uniqueHashes[f.MatchSHA256] = true
+	s, err := srv.sessions.Get(sessionID)
+	if err != nil {
+		srv.state.mu.Lock()
+		findings := make([]scanner.Finding, len(srv.state.Findings))
+		copy(findings, srv.state.Findings)
+		srv.state.mu.Unlock()
+		if len(findings) == 0 {
+			return "", fmt.Errorf("session not found and no active scan")
+		}
+		return buildFromFindings(findings), nil
 	}
 
-	maxFindings := 50
-	subset := s.Findings
-	if len(subset) > maxFindings {
-		subset = subset[:maxFindings]
-	}
-	findingsJSON, _ := json.MarshalIndent(subset, "", "  ")
-
-	patSummary := ""
-	for k, v := range patMap {
-		patSummary += fmt.Sprintf("  %s: %d\n", k, v)
-	}
-
-	return fmt.Sprintf(veeSystemPromptTemplate, sessionID, len(s.Findings), len(uniqueHashes), string(findingsJSON), patSummary), nil
+	return buildFromFindings(s.Findings), nil
 }
 
 func min(a, b int) int {
@@ -120,9 +207,9 @@ func min(a, b int) int {
 }
 
 const veeNoScanPrompt = `You are Vee, Vaultify's security assistant. You speak British English, are concise, professional, and approachable.
-No scan has been run yet. You can:
+No scan data is loaded. You can:
 - Explain what Vaultify does (scans for plaintext secrets, helps vault or remove them)
-- Guide the user to click "Start Scan" on the Scan tab
+- Guide the user to either click "Start Scan" on the Scan tab, or load a previous session from the Reports tab
 - Answer general questions about secrets management, credential hygiene, and vault best practices
 - Explain what each pattern type detects (AWS keys, GitHub tokens, Slack tokens, etc.)
 
@@ -130,12 +217,20 @@ Keep responses concise. Use UK English spelling.`
 
 func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 	var req veeChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := readRequestJSON(r, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
 		return
 	}
+	if req.SessionID != "" && !session.IsValidID(req.SessionID) {
+		httpError(w, http.StatusBadRequest, "invalid session id")
+		return
+	}
 
-	systemPrompt, err := srv.buildVeeContext(req.SessionID)
+	systemPrompt, err := srv.buildVeeContext(req.SessionID, req.Context)
 	if err != nil {
 		systemPrompt = veeNoScanPrompt
 	}
@@ -187,8 +282,8 @@ func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 	providers := []veeProviderStatus{
-		{ID: "openai", Name: "OpenAI", NeedsKey: true},
-		{ID: "anthropic", Name: "Anthropic", NeedsKey: true},
+		{ID: "openai", Name: "GPT", NeedsKey: true},
+		{ID: "anthropic", Name: "Claude", NeedsKey: true},
 		{ID: "gemini", Name: "Gemini", NeedsKey: true},
 		{ID: "ollama", Name: "Ollama", NeedsKey: false},
 	}
@@ -217,7 +312,11 @@ func (srv *Server) handleVeeModels(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 		Key      string `json:"key"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := readRequestJSON(r, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
 		return
 	}
@@ -270,7 +369,11 @@ func (srv *Server) handleVeeModels(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleVeeStoreKey(w http.ResponseWriter, r *http.Request) {
 	var req veeKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := readRequestJSON(r, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
 		return
 	}
@@ -297,7 +400,8 @@ func (srv *Server) handleVeeStoreKey(w http.ResponseWriter, r *http.Request) {
 		existing := exec.Command(opPath, "item", "edit", title, "--vault", "Vaultify", "credential="+req.Key, "username="+model)
 		out2, err2 := existing.CombinedOutput()
 		if err2 != nil {
-			httpError(w, http.StatusInternalServerError, "failed to store key: %s / %s", strings.TrimSpace(string(out)), strings.TrimSpace(string(out2)))
+			log.Printf("vee store key: create err=%v out=%s edit err=%v out2=%s", err, strings.TrimSpace(string(out)), err2, strings.TrimSpace(string(out2)))
+			httpError(w, http.StatusInternalServerError, "failed to store key in vault")
 			return
 		}
 	}
@@ -430,7 +534,7 @@ func callAnthropic(apiKey, model, systemPrompt, userMessage string, w http.Respo
 }
 
 func callGemini(apiKey, model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
 	body := map[string]any{
 		"system_instruction": map[string]any{"parts": []map[string]string{{"text": systemPrompt}}},
 		"contents":           []map[string]any{{"parts": []map[string]string{{"text": userMessage}}}},
@@ -438,6 +542,7 @@ func callGemini(apiKey, model, systemPrompt, userMessage string, w http.Response
 	data, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -469,6 +574,327 @@ func callGemini(apiKey, model, systemPrompt, userMessage string, w http.Response
 		return text, nil
 	}
 	return "", fmt.Errorf("no response from Gemini")
+}
+
+// --- Non-streaming LLM calls (for FP finder etc.) ---
+
+func openaiGenerateBlock(apiKey, model, systemPrompt, userMessage string) (string, error) {
+	if model == "" || model == "default" {
+		model = "gpt-4.1-mini"
+	}
+	body := map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userMessage},
+		},
+		"stream": false,
+	}
+	data, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("OpenAI error %d: %s", resp.StatusCode, string(respBody))
+	}
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	json.Unmarshal(respBody, &result)
+	if len(result.Choices) > 0 {
+		return result.Choices[0].Message.Content, nil
+	}
+	return "", fmt.Errorf("no response from OpenAI")
+}
+
+func anthropicGenerateBlock(apiKey, model, systemPrompt, userMessage string) (string, error) {
+	if model == "" || model == "default" {
+		model = "claude-3-5-haiku-20241022"
+	}
+	body := map[string]any{
+		"model":      model,
+		"max_tokens": 2048,
+		"system":     systemPrompt,
+		"messages":   []map[string]string{{"role": "user", "content": userMessage}},
+	}
+	data, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("Anthropic error %d: %s", resp.StatusCode, string(respBody))
+	}
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	json.Unmarshal(respBody, &result)
+	if len(result.Content) > 0 {
+		return result.Content[0].Text, nil
+	}
+	return "", fmt.Errorf("no response from Anthropic")
+}
+
+func geminiGenerateBlock(apiKey, model, systemPrompt, userMessage string) (string, error) {
+	if model == "" || model == "default" {
+		model = "gemini-2.0-flash"
+	}
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
+	body := map[string]any{
+		"system_instruction": map[string]any{"parts": []map[string]string{{"text": systemPrompt}}},
+		"contents":           []map[string]any{{"parts": []map[string]string{{"text": userMessage}}}},
+	}
+	data, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("Gemini error %d: %s", resp.StatusCode, string(respBody))
+	}
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	json.Unmarshal(respBody, &result)
+	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
+		return result.Candidates[0].Content.Parts[0].Text, nil
+	}
+	return "", fmt.Errorf("no response from Gemini")
+}
+
+func ollamaGenerateBlock(model, systemPrompt, userMessage string) (string, error) {
+	if model == "" || model == "default" {
+		model = "llama3.2"
+	}
+	body := map[string]any{
+		"model":  model,
+		"prompt": systemPrompt + "\n\nUser: " + userMessage + "\n\nAssistant (JSON only):",
+		"stream": false,
+	}
+	data, _ := json.Marshal(body)
+	resp, err := http.Post("http://localhost:11434/api/generate", "application/json", bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Response string `json:"response"`
+	}
+	json.Unmarshal(respBody, &result)
+	if result.Response != "" {
+		return result.Response, nil
+	}
+	return "", fmt.Errorf("no response from Ollama")
+}
+
+func stripJSONFence(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		lines := strings.SplitN(s, "\n", 2)
+		if len(lines) == 2 {
+			s = lines[1]
+		}
+		if i := strings.LastIndex(s, "```"); i >= 0 {
+			s = strings.TrimSpace(s[:i])
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+type veeFpFinderRequest struct {
+	SessionID string `json:"session_id"`
+	Provider  string `json:"provider"`
+}
+
+type veeFpFinderResponse struct {
+	LikelyFalsePositiveHashes []string `json:"likely_false_positive_hashes"`
+	Reasoning                 string   `json:"reasoning"`
+}
+
+func (srv *Server) handleVeeFpFinder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req veeFpFinderRequest
+	if err := readRequestJSON(r, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
+		return
+	}
+	sid := req.SessionID
+	if sid == "" {
+		srv.state.mu.Lock()
+		sid = srv.state.SessionID
+		srv.state.mu.Unlock()
+	}
+	if sid == "" {
+		httpError(w, http.StatusBadRequest, "session_id required")
+		return
+	}
+	if !session.IsValidID(sid) {
+		httpError(w, http.StatusBadRequest, "invalid session id")
+		return
+	}
+
+	var findings []scanner.Finding
+	sess, err := srv.sessions.Get(sid)
+	if err != nil {
+		srv.state.mu.Lock()
+		findings = make([]scanner.Finding, len(srv.state.Findings))
+		copy(findings, srv.state.Findings)
+		srv.state.mu.Unlock()
+	} else {
+		findings = sess.Findings
+	}
+	if len(findings) == 0 {
+		httpError(w, http.StatusBadRequest, "no findings in session")
+		return
+	}
+
+	type fpRow struct {
+		H    string  `json:"h"`
+		P    string  `json:"p"`
+		S    string  `json:"s"`
+		E    float64 `json:"e"`
+		Path string  `json:"path"`
+		Ln   int     `json:"ln"`
+		L    string  `json:"layer,omitempty"`
+		Prev string  `json:"prev"`
+	}
+	seen := map[string]scanner.Finding{}
+	for _, f := range findings {
+		if f.MatchSHA256 == "" {
+			continue
+		}
+		if _, ok := seen[f.MatchSHA256]; !ok {
+			seen[f.MatchSHA256] = f
+		}
+	}
+	rows := make([]fpRow, 0, len(seen))
+	for _, f := range seen {
+		prev := f.RedactedPreview
+		if len(prev) > 12 {
+			prev = prev[:6] + "..." + prev[len(prev)-4:]
+		}
+		rows = append(rows, fpRow{
+			H:    f.MatchSHA256,
+			P:    f.PatternID,
+			S:    f.Severity,
+			E:    f.Entropy,
+			Path: f.RelativePath,
+			Ln:   f.LineNumber,
+			L:    f.DetectionLayer,
+			Prev: prev,
+		})
+	}
+	max := 100
+	if len(rows) > max {
+		rows = rows[:max]
+	}
+	payload, _ := json.MarshalIndent(rows, "", "  ")
+
+	system := `You are Vee, Vaultify's triage assistant. You receive ONLY redacted metadata about secret findings (no real secret values).
+Your task: identify likely FALSE POSITIVES — e.g. cache paths, test fixtures, placeholder-looking previews, very low entropy with generic pattern names, SDK/browser profile paths, documentation examples.
+Respond with STRICTLY valid JSON only — no markdown fences, no commentary outside JSON.
+Shape: {"likely_false_positive_hashes":["64-char hex sha256..."],"reasoning":"brief UK English explanation"}`
+
+	user := fmt.Sprintf("Findings metadata (unique by match hash):\n%s\n\nReturn JSON listing match_sha256 values (field h) that are likely false positives.", string(payload))
+
+	provider := req.Provider
+	if provider == "" {
+		provider = "gemini"
+	}
+	model := srv.getVeeModel(provider)
+	apiKey := srv.getVeeKey(provider)
+
+	var text string
+	var callErr error
+	switch provider {
+	case "openai":
+		if apiKey == "" {
+			httpError(w, http.StatusBadRequest, "No OpenAI API key in vault (vee-openai-key)")
+			return
+		}
+		text, callErr = openaiGenerateBlock(apiKey, model, system, user)
+	case "anthropic":
+		if apiKey == "" {
+			httpError(w, http.StatusBadRequest, "No Anthropic API key in vault")
+			return
+		}
+		text, callErr = anthropicGenerateBlock(apiKey, model, system, user)
+	case "gemini":
+		if apiKey == "" {
+			httpError(w, http.StatusBadRequest, "No Gemini API key in vault")
+			return
+		}
+		text, callErr = geminiGenerateBlock(apiKey, model, system, user)
+	case "ollama":
+		text, callErr = ollamaGenerateBlock(model, system, user)
+	default:
+		httpError(w, http.StatusBadRequest, "unknown provider: %s", provider)
+		return
+	}
+	if callErr != nil {
+		httpError(w, http.StatusInternalServerError, "LLM: %v", callErr)
+		return
+	}
+	text = stripJSONFence(text)
+	var out veeFpFinderResponse
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		raw := text
+		if len(raw) > 300 {
+			raw = raw[:300] + "..."
+		}
+		log.Printf("vee fp-finder: parse model JSON: %v; raw snippet: %s", err, raw)
+		httpError(w, http.StatusInternalServerError, "model response could not be parsed")
+		return
+	}
+	valid := map[string]bool{}
+	for _, f := range seen {
+		valid[f.MatchSHA256] = true
+	}
+	filtered := make([]string, 0, len(out.LikelyFalsePositiveHashes))
+	for _, h := range out.LikelyFalsePositiveHashes {
+		if valid[h] {
+			filtered = append(filtered, h)
+		}
+	}
+	out.LikelyFalsePositiveHashes = filtered
+	writeJSON(w, http.StatusOK, out)
 }
 
 func callOllama(model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {

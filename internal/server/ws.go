@@ -2,16 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
 )
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
 
 // Hub maintains the set of active WebSocket clients and broadcasts messages.
 type Hub struct {
@@ -84,8 +82,11 @@ func (h *Hub) Broadcast(data any) {
 }
 
 // ServeWs upgrades an HTTP connection to WebSocket and registers the client
-// with the hub.
-func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
+// with the hub. checkOrigin must allow only trusted Vaultify UI origins.
+func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request, checkOrigin func(*http.Request) bool) {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: checkOrigin,
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws: upgrade error: %v", err)
@@ -101,6 +102,22 @@ func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
 
 	go client.writePump()
 	go client.readPump()
+}
+
+func (srv *Server) handleScanWebSocket(w http.ResponseWriter, r *http.Request) {
+	srv.hub.ServeWs(w, r, srv.wsCheckOrigin)
+}
+
+func (srv *Server) wsCheckOrigin(r *http.Request) bool {
+	o := strings.TrimSpace(r.Header.Get("Origin"))
+	if o == "" {
+		return true
+	}
+	port := srv.listenPort
+	if port == 0 {
+		port = 9471
+	}
+	return o == fmt.Sprintf("http://127.0.0.1:%d", port) || o == fmt.Sprintf("http://localhost:%d", port)
 }
 
 // readPump reads messages from the WebSocket connection. When the connection

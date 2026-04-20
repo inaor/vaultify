@@ -11,11 +11,14 @@ import (
 var patternsJSON []byte
 
 type Pattern struct {
-	ID          string `json:"id"`
-	Regex       string `json:"regex"`
-	Severity    string `json:"severity"`
-	Description string `json:"description"`
-	IgnoreCase  bool   `json:"ignore_case"`
+	ID          string  `json:"id"`
+	Prefix      string  `json:"prefix,omitempty"`
+	Regex       string  `json:"regex"`
+	Severity    string  `json:"severity"`
+	Description string  `json:"description"`
+	IgnoreCase  bool    `json:"ignore_case"`
+	MinEntropy  float64 `json:"min_entropy,omitempty"`
+	AddedIn     string  `json:"added_in,omitempty"`
 }
 
 type CompiledPattern struct {
@@ -25,6 +28,14 @@ type CompiledPattern struct {
 
 type patternsFile struct {
 	Patterns []Pattern `json:"patterns"`
+}
+
+func RawPatterns() []Pattern {
+	var raw patternsFile
+	if err := json.Unmarshal(patternsJSON, &raw); err != nil {
+		return nil
+	}
+	return raw.Patterns
 }
 
 func LoadPatterns() []CompiledPattern {

@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Vaultify</title>
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/style.css?v=0.1.7">
 </head>
 <body>
   <div class="sidebar">
-    <div class="brand">Vaultify <span>v0.1.1 &mdash; Credential Remediation</span></div>
-    <nav>
+    <div class="brand">Vaultify <span>v0.1.7</span></div>
+    <nav class="sidebar-nav-inner">
       <a href="#dashboard" data-page="dashboard" class="active">
         <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
         Scan
@@ -23,14 +23,49 @@
         <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
         Reports <span class="badge">0</span>
       </a>
-      <a href="#audit" data-page="audit">
-        <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-        Audit Log
+      <a href="#catalogue" data-page="catalogue">
+        <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+        Secret Catalogue <span class="badge" id="navCatBadge">0</span>
+      </a>
+      <a href="#" onclick="event.preventDefault();App.showEnterpriseModal()" class="ent-nav-item">
+        <svg viewBox="0 0 24 24"><path d="M19 5v2h-4V5h4M9 5v6H5V5h4m10 8v6h-4v-6h4M9 17v2H5v-2h4M21 3h-8v6h8V3zM11 3H3v10h8V3zm10 8h-8v10h8V11zM11 15H3v6h8v-6z"/></svg>
+        Unified Dashboard <span class="ent-badge">&#x1F48E;</span>
+      </a>
+      <a href="#" onclick="event.preventDefault();App.showEnterpriseModal()" class="ent-nav-item">
+        <svg viewBox="0 0 24 24"><path d="M23 12l-2.44-2.78.34-3.68-3.61-.82-1.89-3.18L12 3 8.6 1.54 6.71 4.72l-3.61.81.34 3.68L1 12l2.44 2.78-.34 3.69 3.61.82 1.89 3.18L12 21l3.4 1.46 1.89-3.18 3.61-.82-.34-3.68L23 12zm-10 5h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        Compliance <span class="ent-badge">&#x1F48E;</span>
+      </a>
+      <a href="#" onclick="event.preventDefault();App.showEnterpriseModal()" class="ent-nav-item">
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.611 3.611 0 0112 15.6z"/></svg>
+        Settings <span class="ent-badge">&#x1F48E;</span>
       </a>
       <a href="#version" data-page="version">
         <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
         Version
       </a>
+      <a href="#audit" data-page="audit">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+        Audit Log
+      </a>
+      <a href="#docs" data-page="docs">
+        <svg viewBox="0 0 24 24"><path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/></svg>
+        Docs
+      </a>
+      <div class="sidebar-bottom-dock">
+        <a href="#" onclick="event.preventDefault();App.tour.start()" class="sidebar-nav-secondary">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+          Walkthrough
+        </a>
+        <div class="sidebar-vault-block" id="sidebarVaultSection">
+          <div class="sidebar-vault-heading">Choose a Vault</div>
+          <div id="sidebarVaultGrid" class="sidebar-vault-grid" aria-busy="true" aria-label="Loading vault providers">
+            <div class="sidebar-vault-tile sidebar-vault-tile--skeleton"><span class="sidebar-vault-skel-logo sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--lg sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--sm sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--status sidebar-vault-skel-shimmer"></span></div>
+            <div class="sidebar-vault-tile sidebar-vault-tile--skeleton"><span class="sidebar-vault-skel-logo sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--lg sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--sm sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--status sidebar-vault-skel-shimmer"></span></div>
+            <div class="sidebar-vault-tile sidebar-vault-tile--skeleton"><span class="sidebar-vault-skel-logo sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--lg sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--sm sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--status sidebar-vault-skel-shimmer"></span></div>
+            <div class="sidebar-vault-tile sidebar-vault-tile--skeleton"><span class="sidebar-vault-skel-logo sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--lg sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--sm sidebar-vault-skel-shimmer"></span><span class="sidebar-vault-skel-line sidebar-vault-skel-line--status sidebar-vault-skel-shimmer"></span></div>
+          </div>
+        </div>
+      </div>
     </nav>
   </div>
 
@@ -38,62 +73,129 @@
     <!-- SCAN PAGE -->
     <div class="page active" id="page-dashboard">
       <div class="shell">
-        <div class="toolbar">
-          <button class="tb-btn" id="btnStartScan" onclick="App.startScan()" style="font-size:.9rem;padding:9px 18px">
-            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-            Start Scan
-          </button>
-          <button class="tb-btn" id="btnStopScan" onclick="App.stopScan()" style="border-color:var(--warn);color:var(--warn);display:none;font-size:.9rem;padding:9px 18px">
-            <svg viewBox="0 0 24 24"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
-            Stop
-          </button>
+        <!-- Hero Status Bar -->
+        <div class="hero-bar">
+          <div class="hero-left">
+            <div class="scan-btn-group" id="scanBtnGroup">
+              <button class="scan-start-btn" id="btnStartScan" onclick="App.startScan()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                Start Scan
+              </button>
+              <button class="scan-drop-btn2" id="btnScanDrop" onclick="App.toggleScanMenu()">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+              </button>
+              <div class="scan-menu" id="scanMenu">
+                <div class="scan-menu-item" onclick="App.hideScanMenu();App.startScan()">
+                  <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                  Scan Entire Machine
+                  <span class="scan-menu-hint">Scans your home directory</span>
+                </div>
+                <div class="scan-menu-item" onclick="App.hideScanMenu();App.showFolderPicker()">
+                  <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                  Scan Specific Folder
+                  <span class="scan-menu-hint">Choose a directory to scan</span>
+                </div>
+                <div class="scan-menu-item" onclick="App.hideScanMenu();App.showProModal()" style="opacity:.7">
+                  <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                  Schedule Scan <span style="margin-left:auto;font-size:.72rem">&#x1F451;</span>
+                  <span class="scan-menu-hint">Automate recurring scans</span>
+                </div>
+              </div>
+            </div>
+            <button class="scan-stop-btn" id="btnStopScan" onclick="App.stopScan()" style="display:none">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+              Stop
+            </button>
+          </div>
+          <div class="hero-status">
+            <span class="status-pill" id="heroStatusPill">
+              <span class="status-dot" id="heroStatusDot"></span>
+              <span id="heroStatusText">Ready</span>
+            </span>
+          </div>
+          <div class="hero-right">
+            <span class="hero-elapsed" id="heroElapsed" style="display:none">0:00</span>
+            <span class="hero-throughput" id="heroThroughput" style="display:none"></span>
+          </div>
         </div>
 
-        <div class="gauges">
-          <div class="gauge-card">
-            <div class="ring-wrap">
-              <svg viewBox="0 0 100 100"><circle class="ring-bg"/><circle class="ring-fg" id="progRing" style="stroke:var(--accent);stroke-dasharray:251.2;stroke-dashoffset:251.2"/></svg>
-              <div class="ring-label"><span class="ring-val" id="progVal" style="color:var(--accent)">0%</span><span class="ring-sub">progress</span></div>
+        <!-- Folder Picker Panel -->
+        <div class="folder-picker" id="folderPicker" style="display:none">
+          <div class="folder-picker-header">
+            <span style="font-weight:700;font-size:.92rem">Choose Scan Folder</span>
+            <button class="tb-btn" onclick="App.hideFolderPicker()" style="padding:4px 10px;font-size:.78rem">Cancel</button>
+          </div>
+          <div class="folder-picker-input-row">
+            <input type="text" id="folderPath" placeholder="Enter or paste a folder path..." style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 14px;font:inherit;font-size:.88rem">
+            <button class="btn-primary" id="btnScanFolder" onclick="App.startFolderScan()" style="padding:9px 20px;font-size:.88rem;white-space:nowrap">Scan This Folder</button>
+          </div>
+          <div id="folderQuickPicks" style="display:none;margin-bottom:12px">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;font-weight:600">Quick Pick</div>
+            <div id="folderQuickList" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+          </div>
+          <div id="folderBrowser">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;font-weight:600">
+              <span id="folderBrowserPath" style="text-transform:none;letter-spacing:normal;font-family:monospace;font-size:.78rem"></span>
+            </div>
+            <div id="folderBrowserList" style="max-height:200px;overflow-y:auto"></div>
+          </div>
+        </div>
+
+        <!-- Metric Cards -->
+        <div class="metrics">
+          <div class="m-card m-card-cyan"><div class="m-icon">&#x1F4C1;</div><div class="m-val" id="mFiles">0</div><div class="m-lbl">Files Scanned</div></div>
+          <div class="m-card m-card-rose"><div class="m-icon">&#x26A0;&#xFE0F;</div><div class="m-val" id="mHits">0</div><div class="m-lbl">Findings</div></div>
+          <div class="m-card m-card-violet"><div class="m-icon">&#x1F511;</div><div class="m-val" id="gUnique">0</div><div class="m-lbl">Unique Secrets</div></div>
+          <div class="m-card m-card-success"><div class="m-icon">&#x1F9E9;</div><div class="m-val" id="mPatterns">0</div><div class="m-lbl">Pattern Types</div></div>
+        </div>
+
+        <!-- Scan Visualization: Progress Ring + Severity Donut -->
+        <div class="viz-row">
+          <div class="gauge-card viz-card">
+            <div class="ring-wrap" style="width:160px;height:160px">
+              <svg viewBox="0 0 100 100"><circle class="ring-bg" style="stroke-width:5"/><circle class="ring-fg" id="progRing" style="stroke:var(--accent);stroke-dasharray:251.2;stroke-dashoffset:251.2;stroke-width:5"/></svg>
+              <div class="ring-label"><span class="ring-val" id="progVal" style="color:var(--accent);font-size:2.4rem">0%</span><span class="ring-sub">progress</span></div>
             </div>
             <div class="gauge-stats">
               <div class="gauge-title">Scan Progress</div>
               <div class="gauge-row"><span class="gl">Files scanned</span><span class="gv" id="gFiles">0 / 0</span></div>
               <div class="gauge-row"><span class="gl">File cap</span><span class="gv" id="gCap">100,000</span></div>
+              <div id="currentPathRow" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+                <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Scanning</div>
+                <div id="currentPath" style="font-size:.72rem;font-family:ui-monospace,Consolas,monospace;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px"></div>
+              </div>
             </div>
           </div>
-          <div class="gauge-card">
-            <div class="ring-wrap">
-              <svg viewBox="0 0 100 100"><circle class="ring-bg"/><circle class="ring-fg" id="riskRing" style="stroke:var(--ok);stroke-dasharray:251.2;stroke-dashoffset:251.2"/></svg>
-              <div class="ring-label"><span class="ring-val" id="riskVal" style="color:var(--ok)">0</span><span class="ring-sub">exposure</span></div>
+          <div class="gauge-card viz-card">
+            <div class="donut-wrap">
+              <svg viewBox="0 0 100 100" id="sevDonut">
+                <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(30,42,58,.6)" stroke-width="5"/>
+              </svg>
+              <div class="donut-center"><span class="donut-val" id="donutVal">0</span><span class="ring-sub">secrets</span></div>
             </div>
             <div class="gauge-stats">
-              <div class="gauge-title">Risk Assessment</div>
-              <div class="gauge-row"><span class="gl">Level</span><span class="gv" id="gRiskLabel">Low</span></div>
-              <div class="gauge-row"><span class="gl">Findings</span><span class="gv" id="gHits">0</span></div>
-              <div class="gauge-row"><span class="gl">Plaintext secrets</span><span class="gv" id="gUnique2">0</span></div>
+              <div class="gauge-title">Severity Breakdown</div>
+              <div id="sevLegend" style="display:flex;flex-direction:column;gap:6px;font-size:.82rem">
+                <div class="empty-msg" style="padding:8px 0;font-size:.78rem">No findings yet</div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="metrics">
-          <div class="m-card"><div class="m-val" id="mFiles">0</div><div class="m-lbl">Files Scanned</div></div>
-          <div class="m-card"><div class="m-val" id="mHits">0</div><div class="m-lbl">Findings</div></div>
-          <div class="m-card"><div class="m-val" id="gUnique">0</div><div class="m-lbl">Unique Secrets</div></div>
-          <div class="m-card"><div class="m-val" id="mPatterns">0</div><div class="m-lbl">Pattern Types</div></div>
+        <!-- Pattern Graph + Findings Explorer -->
+        <div class="feed-row">
+          <div class="card feed-card">
+            <div class="card-title" style="justify-content:space-between"><span>Pattern Graph <span class="badge" id="patBadge">0 types</span></span><button class="tb-btn" onclick="App.showProModal()" style="font-size:.68rem;padding:3px 10px;opacity:.7" id="btnExpandGraph">Expand &#x1F451;</button></div>
+            <div id="patGraphHint" class="pat-graph-hint" style="display:none;padding:0 4px 8px;font-size:.68rem;color:var(--c-slate);line-height:1.35"></div>
+            <div id="patternGraph" style="position:relative;min-height:300px"><div class="empty-msg">Start a scan to see patterns.</div></div>
+          </div>
+          <div class="card feed-card">
+            <div class="card-title">Findings Explorer</div>
+            <div id="findingsTree" class="findings-tree"><div class="empty-msg">Start a scan to see findings.</div></div>
+          </div>
         </div>
 
-        <div class="card">
-          <div class="card-title">Pattern Breakdown <span class="badge" id="patBadge">0 types</span></div>
-          <div id="patterns"><div class="empty-msg">Start a scan to see results.</div></div>
-        </div>
-
-      <div class="card">
-        <div class="card-title">Vault Readiness</div>
-        <div id="vaultStatus"><div class="empty-msg">Detecting vault CLIs...</div></div>
-        <div id="vaultAuth" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"></div>
-      </div>
-
-        <footer>Vaultify v0.1 &mdash; Credential Remediation Toolkit</footer>
+        <footer class="vaultify-footer"></footer>
       </div>
     </div>
 
@@ -101,12 +203,22 @@
     <div class="page" id="page-review">
       <div class="shell">
         <div class="toolbar">
-          <input type="search" id="reviewSearch" placeholder="Filter by pattern, path, preview..." oninput="App.reviewPage=0;App.renderReview()" style="flex:1;min-width:200px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 14px;font:inherit;font-size:.9rem">
+          <input type="search" id="reviewSearch" placeholder="Filter by pattern, folder, file, path, preview..." oninput="App.reviewPage=0;App.renderReview()" style="flex:1;min-width:200px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 14px;font:inherit;font-size:.9rem">
+          <button class="tb-btn" onclick="App.showProModal()" style="font-size:.78rem;padding:7px 14px;opacity:.7">Export CSV &#x1F451;</button>
           <button class="btn-primary" id="btnApply" onclick="App.showApplyModal()" style="font-size:.9rem;padding:9px 20px">Apply Decisions</button>
         </div>
+        <div id="bulkActions" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <button class="tb-btn" onclick="App.runVeeFpFinder()" style="font-size:.75rem;padding:5px 12px;border-color:var(--c-violet);color:var(--c-violet)" title="Requires vault open + AI provider key in Vee"><span aria-hidden="true">&#x2728;</span> Vee FP Finder</button>
+          <button class="tb-btn" onclick="App.bulkDecision('critical','vault')" style="font-size:.75rem;padding:5px 12px;border-color:var(--ok);color:var(--ok)"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg>Vaultify All Critical</button>
+          <button class="tb-btn" onclick="App.bulkDecision('high','vault')" style="font-size:.75rem;padding:5px 12px;border-color:var(--orange);color:var(--orange)"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg>Vaultify All High</button>
+          <button class="tb-btn" onclick="App.bulkDecision('low','graveyard')" style="font-size:.75rem;padding:5px 12px"><span style="vertical-align:-2px;margin-right:4px" aria-hidden="true">&#x1F5D1;&#xFE0F;</span>Junkyard All Low</button>
+          <button class="tb-btn" onclick="App.clearAllDecisions()" style="font-size:.75rem;padding:5px 12px;color:var(--muted)">Clear All</button>
+        </div>
         <div id="reviewStats" style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+        <div id="autoSuggestBanner" style="display:none"></div>
         <div id="reviewContent"><div class="empty-msg">Run a scan first, then review findings here.</div></div>
-        <footer>Vaultify v0.1 &mdash; Credential Remediation Toolkit</footer>
+        <div id="remediationSummary"></div>
+        <footer class="vaultify-footer"></footer>
       </div>
     </div>
 
@@ -114,10 +226,155 @@
     <div class="page" id="page-reports">
       <div class="shell" style="padding-top:24px">
         <div class="card">
-          <div class="card-title">Scan History</div>
+          <div class="card-title" style="justify-content:space-between">
+            <span>Scan History</span>
+            <div style="display:flex;gap:4px">
+              <button class="tb-btn" id="btnReportsActive" onclick="App.showReportsTab('active')" style="font-size:.72rem;padding:4px 12px;border-color:var(--accent);color:var(--accent)">Active</button>
+              <button class="tb-btn" id="btnReportsArchive" onclick="App.showReportsTab('archive')" style="font-size:.72rem;padding:4px 12px">Archive</button>
+            </div>
+          </div>
           <div id="reportsContent"><div class="empty-msg">No scan sessions found.</div></div>
         </div>
-        <footer>Vaultify v0.1 &mdash; Credential Remediation Toolkit</footer>
+        <footer class="vaultify-footer"></footer>
+      </div>
+    </div>
+
+    <!-- AUDIT LOG PAGE -->
+    <div class="page" id="page-audit">
+      <div class="shell" style="padding-top:24px">
+        <div class="card">
+          <div class="card-title" style="justify-content:space-between"><span>Audit Log</span><button class="tb-btn" onclick="App.showProModal()" style="font-size:.72rem;padding:4px 12px;opacity:.7">Export Audit Trail &#x1F451;</button></div>
+          <div id="auditContent"><div class="empty-msg">No actions recorded yet.</div></div>
+        </div>
+        <footer class="vaultify-footer"></footer>
+      </div>
+    </div>
+
+    <!-- SECRET CATALOGUE PAGE -->
+    <div class="page" id="page-catalogue">
+      <div class="shell" style="padding-top:24px">
+        <div class="card">
+          <div class="card-title" style="justify-content:space-between">
+            <span>Secret Catalogue <span class="badge" id="catalogueBadge">0 patterns</span></span>
+            <button class="tb-btn" onclick="App.showProModal()" style="font-size:.72rem;padding:4px 12px;opacity:.7">Add Custom Patterns &#x1F451;</button>
+          </div>
+          <div style="margin-bottom:14px">
+            <input type="search" id="catalogueSearch" placeholder="Search patterns by name, ID, or severity..." oninput="App.cataloguePage=0;App.renderCatalogue()" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 14px;font:inherit;font-size:.88rem">
+          </div>
+          <div id="catalogueContent"><div class="empty-msg">Loading catalogue...</div></div>
+        </div>
+        <footer class="vaultify-footer"></footer>
+      </div>
+    </div>
+
+    <!-- DOCS PAGE -->
+    <div class="page" id="page-docs">
+      <div class="shell" style="padding-top:24px">
+        <div class="card">
+          <div class="card-title">Detection Pipeline</div>
+          <div style="font-size:.88rem;line-height:1.7;color:var(--text)">
+            <p style="margin-bottom:12px">Vaultify uses a <strong>sequenced multi-layer detection pipeline</strong> to identify plaintext credentials on your endpoint.</p>
+            <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+              <div style="flex:1;min-width:200px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px">
+                <div style="font-weight:700;color:var(--c-cyan);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Pre-Validate</div>
+                <div style="font-size:.82rem;color:var(--c-slate)">File type and path filtering. Only relevant files enter the pipeline. Browser caches, node_modules, and system directories are excluded.</div>
+              </div>
+              <div style="flex:1;min-width:200px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px">
+                <div style="font-weight:700;color:var(--c-violet);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Layer 2: Context</div>
+                <div style="font-size:.82rem;color:var(--c-slate)">Scans assignment patterns (key=value) for compound keywords like <code style="color:var(--c-violet)">api_key</code>, <code style="color:var(--c-violet)">password</code>, <code style="color:var(--c-violet)">secret_access</code>. Runs first on lines with = or : operators.</div>
+              </div>
+              <div style="flex:1;min-width:200px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px">
+                <div style="font-weight:700;color:var(--c-rose);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Layer 1: Value Patterns</div>
+                <div style="font-size:.82rem;color:var(--c-slate)">54 regex patterns with prefix fast-skip. Matches known token formats: <code style="color:var(--c-rose)">AKIA</code>, <code style="color:var(--c-rose)">ghp_</code>, <code style="color:var(--c-rose)">xoxb-</code>, <code style="color:var(--c-rose)">sk-</code>, and 50 more.</div>
+              </div>
+              <div style="flex:1;min-width:200px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px">
+                <div style="font-weight:700;color:var(--c-success);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Post-Validate</div>
+                <div style="font-size:.82rem;color:var(--c-slate)">Deduplication by SHA256, entropy computation, confidence scoring. When both layers agree on the same value, confidence is highest.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Entropy Scoring</div>
+          <div style="font-size:.88rem;line-height:1.7;color:var(--text)">
+            <p style="margin-bottom:12px"><strong>Shannon entropy</strong> measures the randomness of a string in bits per character. Real secrets are generated randomly and have high entropy. Code identifiers, English words, and placeholders have low entropy.</p>
+            <table style="width:100%;border-collapse:collapse;font-size:.84rem;margin-bottom:12px">
+              <thead><tr>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">Entropy Range</th>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">Interpretation</th>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">Example</th>
+              </tr></thead>
+              <tbody>
+                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-cyan);font-weight:700">4.0+</td><td style="padding:8px 12px;border-bottom:1px solid var(--border)">High confidence — likely a real secret</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">AKIA5REXAMPLE1234</td></tr>
+                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-cyan);font-weight:700;opacity:.7">3.0-4.0</td><td style="padding:8px 12px;border-bottom:1px solid var(--border)">Moderate — could be a secret or structured data</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">ghp_XkDemoToken9mRt</td></tr>
+                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-cyan);font-weight:700;opacity:.5">&lt; 3.0</td><td style="padding:8px 12px;border-bottom:1px solid var(--border)">Low — likely a code identifier or placeholder</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">loadingSpinnerClassName</td></tr>
+              </tbody>
+            </table>
+            <p style="color:var(--c-slate);font-size:.82rem">Entropy is computed using the standard Shannon formula: H = -sum(p * log2(p)) for each unique character. The result is shown in cyan in the Review table and Findings Explorer.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Security Model</div>
+          <div style="font-size:.88rem;line-height:1.7;color:var(--text)">
+            <p style="margin-bottom:12px">Vaultify is designed as a <strong>zero-secrets-at-rest</strong> tool. Secret values are never written to disk.</p>
+            <ul style="padding-left:20px;color:var(--c-slate);font-size:.84rem;display:flex;flex-direction:column;gap:6px">
+              <li>No <code>plaintext.json</code> — secret values exist only in your source files and briefly in server memory during a scan</li>
+              <li>Line snippets are redacted before storage — <code>REDACTED_BY_VAULTIFY</code> replaces the matched value</li>
+              <li>WebSocket broadcasts strip <code>Value</code> from findings — the browser never receives raw secrets</li>
+              <li>Live extraction at apply time — when you Vaultify a secret, the value is re-read from the source file, not from cache</li>
+              <li>File permissions: <code>0o700</code> for directories, <code>0o600</code> for files (owner-only)</li>
+              <li>WebSocket origin validation — only <code>localhost</code> connections accepted</li>
+              <li>Server binds to <code>127.0.0.1</code> only — not accessible from the network</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Supported Vaults</div>
+          <div style="font-size:.88rem;line-height:1.7;color:var(--text)">
+            <table style="width:100%;border-collapse:collapse;font-size:.84rem">
+              <thead><tr>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">Provider</th>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">CLI</th>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">Status</th>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">Install</th>
+              </tr></thead>
+              <tbody>
+                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">1Password</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--c-cyan)">op</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-success)">Production</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id AgileBits.1Password.CLI</td></tr>
+                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">AWS Secrets Manager</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--c-cyan)">aws</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-violet)">Planned</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id Amazon.AWSCLI</td></tr>
+                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">HashiCorp Vault</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--c-cyan)">vault</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-violet)">Planned</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id Hashicorp.Vault</td></tr>
+                <tr><td style="padding:8px 12px;font-weight:600">Doppler</td><td style="padding:8px 12px;font-family:monospace;color:var(--c-cyan)">doppler</td><td style="padding:8px 12px;color:var(--c-violet)">Planned</td><td style="padding:8px 12px;font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id Doppler.CLI</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">File Coverage</div>
+          <div style="font-size:.88rem;line-height:1.7;color:var(--text)">
+            <p style="margin-bottom:12px"><strong>Scanned extensions:</strong></p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px" id="docsExtensions"></div>
+            <p style="margin-bottom:12px"><strong>Scanned filenames</strong> (no extension):</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px" id="docsFilenames"></div>
+            <p style="margin-bottom:12px;color:var(--c-slate);font-size:.82rem"><strong>Excluded directories:</strong> node_modules, .git, AppData, browser profiles, package caches, Windows system dirs, and 30+ more. See Secret Catalogue for the full pattern list.</p>
+          </div>
+        </div>
+
+        <footer class="vaultify-footer"></footer>
+      </div>
+    </div>
+
+    <!-- VERSION PAGE -->
+    <div class="page" id="page-version">
+      <div class="shell" style="padding-top:24px">
+        <div class="card">
+          <div class="card-title">Version Info</div>
+          <div id="versionContent"><div class="empty-msg">Loading...</div></div>
+        </div>
+        <div id="releaseNotes"></div>
+        <footer class="vaultify-footer"></footer>
       </div>
     </div>
   </div>
@@ -136,51 +393,130 @@
     </div>
   </div>
 
-  <!-- AUDIT LOG PAGE -->
-  <div class="page" id="page-audit">
-    <div class="shell" style="padding-top:24px">
-      <div class="card">
-        <div class="card-title">Audit Log</div>
-        <div id="auditContent"><div class="empty-msg">No actions recorded yet.</div></div>
+  <!-- VEE FP FINDER MODAL -->
+  <div id="fpFinderOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:110;align-items:center;justify-content:center;flex-direction:row">
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;max-width:560px;width:94vw;max-height:80vh;overflow-y:auto">
+      <div style="padding:18px 22px;border-bottom:1px solid var(--border)">
+        <h2 style="font-size:1.1rem;font-weight:700;margin:0;display:flex;align-items:center;gap:8px"><span aria-hidden="true" style="color:var(--c-violet);font-size:1.15rem;line-height:1">&#x2728;</span> Vee FP Finder</h2>
+        <p style="font-size:.78rem;color:var(--muted);margin:8px 0 0">Review suggestions before moving items to the Junkyard (excluded on next scan).</p>
       </div>
-      <footer>Vaultify v0.1.2 &copy; 2026 &mdash; Credential Remediation Toolkit</footer>
-    </div>
-  </div>
-
-  <!-- VERSION PAGE -->
-  <div class="page" id="page-version">
-    <div class="shell" style="padding-top:24px">
-      <div class="card">
-        <div class="card-title">Version Info</div>
-        <div id="versionContent"><div class="empty-msg">Loading...</div></div>
+      <div id="fpFinderBody" style="padding:18px 22px;font-size:.86rem"></div>
+      <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
+        <button type="button" class="tb-btn" onclick="App.hideFpFinderModal()">Cancel</button>
+        <button class="btn-primary" id="fpFinderApprove" style="display:none" onclick="App.approveVeeFpFinder()">Approve &amp; move to Junkyard</button>
       </div>
-      <footer>Vaultify v0.1.2 &copy; 2026 &mdash; Credential Remediation Toolkit</footer>
     </div>
-  </div>
   </div>
 
   <!-- VEE PANEL -->
   <div class="vee-panel open" id="veePanel">
     <div class="vee-header">
-      <img src="/assets/vee-avatar.png" class="vee-avatar" alt="Vee">
-      <div class="vee-name">Vee <span>Vaultify Security Agent</span></div>
+      <img src="/assets/vee-avatar.png" class="vee-avatar" alt="Vee" onclick="App.tour.start()" style="cursor:pointer" title="Start Walkthrough">
+      <div class="vee-name">Vee <span>Secrets Agent</span></div>
     </div>
     <div class="vee-providers" id="veeProviders"></div>
     <div class="vee-prov-label" id="veeProvLabel">Select a provider to start</div>
     <div id="veeKeyArea"></div>
     <div class="vee-chat" id="veeChat">
-      <div class="vee-msg vee"><div class="msg-name">Vee</div>Hello! I'm Vee, your Vaultify security assistant. Run a scan and I'll help you understand your findings and prioritise remediation. Choose an AI provider above to get started.</div>
+      <div class="vee-msg vee"><div class="msg-name">Vee</div><div class="msg-body">Hello! I'm Vee, your Vaultify security assistant. Run a scan and I'll help you understand your findings and prioritise remediation. Choose an AI provider above to get started.</div></div>
     </div>
     <div class="vee-actions">
       <button class="vee-summary-btn" id="veeSummaryBtn" onclick="App.veeSummary()" disabled style="opacity:.35;cursor:not-allowed">Create Remediation Summary</button>
     </div>
     <div class="vee-input-area">
-      <textarea class="vee-input" id="veeInput" rows="1" placeholder="Ask Vee about your findings..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();App.veeSend()}"></textarea>
-      <button class="vee-send" onclick="App.veeSend()">Send</button>
+      <textarea class="vee-input" id="veeInput" rows="1" disabled placeholder="Select an AI provider above to start chatting" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();App.veeSend()}"></textarea>
+      <button class="vee-send" id="veeSendBtn" onclick="App.veeSend()" disabled>Send</button>
     </div>
   </div>
 
-  <script src="/assets/app.js"></script>
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- PATTERN GRAPH MODAL -->
+  <div id="graphModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:150;align-items:center;justify-content:center">
+    <div style="background:var(--panel-solid);border:1px solid var(--border);border-radius:18px;width:92vw;height:82vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.5)">
+      <div style="padding:16px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:1.1rem;font-weight:700">Pattern Graph <span class="badge" id="patBadgeModal">0 types</span></span>
+        <button class="tb-btn" onclick="App.closeGraphModal()" style="font-size:.78rem;padding:5px 14px">Close</button>
+      </div>
+      <div style="flex:1;display:flex;overflow:hidden">
+        <div id="patternGraphModal" style="flex:1;padding:16px;overflow:hidden;position:relative"></div>
+        <div id="graphNodeLegend" style="display:none;width:280px;background:var(--bg2);border-left:1px solid var(--border);padding:20px;overflow-y:auto">
+          <div style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:var(--c-violet)" id="legendTitle">Pattern Details</div>
+          <div id="legendContent"></div>
+        </div>
+      </div>
+      <div style="padding:8px 24px;border-top:1px solid var(--border);font-size:.72rem;color:var(--c-slate);display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between">
+        <span id="graphModalHint" style="display:none;flex:1;min-width:200px"></span>
+        <span style="display:flex;gap:16px;flex-wrap:wrap"><span>Scroll to zoom</span><span>Click a pattern node to inspect</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRO MODAL -->
+  <div id="proModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center">
+    <div style="background:var(--panel-solid);border:1px solid rgba(251,191,36,.25);border-radius:20px;max-width:640px;width:92vw;box-shadow:0 8px 40px rgba(0,0,0,.5),0 0 40px rgba(251,191,36,.08);animation:slideUp .5s ease;overflow:hidden;display:flex">
+      <img src="/assets/vee-pro.png" style="width:260px;height:auto;object-fit:cover;object-position:center top;flex-shrink:0;border-right:1px solid rgba(251,191,36,.15)">
+      <div style="padding:40px 36px;display:flex;flex-direction:column;justify-content:center;flex:1">
+        <div style="font-size:1.6rem;font-weight:800;margin-bottom:10px;background:linear-gradient(135deg,#fbbf24,#fb923c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2">So you're after going Pro?</div>
+        <div style="font-size:1.05rem;color:var(--text);margin-bottom:8px;font-weight:600">Good choice. Let's go.</div>
+        <div style="font-size:.85rem;color:var(--muted);line-height:1.7;margin-bottom:28px">Expanded Pattern Graph with zoom and inspect, Export CSV, Share Reports, Custom Patterns, Scheduled Scans, and more — power tools for security-conscious individuals and teams.</div>
+        <div>
+          <a href="https://vaultify.live/pro" target="_blank" style="display:inline-block;padding:14px 32px;font-size:1rem;font-weight:700;background:linear-gradient(135deg,rgba(251,191,36,.2),rgba(251,146,60,.15));border:1px solid rgba(251,191,36,.4);border-radius:12px;color:#fbbf24;text-decoration:none;transition:all .2s;cursor:pointer" onmouseover="this.style.boxShadow='0 0 24px rgba(251,191,36,.2)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">Explore Vaultify Pro</a>
+          <button onclick="App.hideProModal()" style="margin-left:16px;background:none;border:none;color:var(--muted);font:inherit;font-size:.82rem;cursor:pointer;vertical-align:middle">Maybe later</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ENTERPRISE MODAL -->
+  <div id="enterpriseModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:200;align-items:center;justify-content:center">
+    <div style="background:linear-gradient(135deg,#0f1520,#1a2030);border:1px solid rgba(148,163,184,.2);border-radius:20px;max-width:640px;width:92vw;box-shadow:0 8px 60px rgba(0,0,0,.6),0 0 80px rgba(148,163,184,.06);animation:slideUp .5s ease;overflow:hidden;display:flex">
+      <img src="/assets/vee-enterprise.png" style="width:260px;height:auto;object-fit:cover;object-position:center top;flex-shrink:0;border-right:1px solid rgba(148,163,184,.1)">
+      <div style="padding:40px 36px;display:flex;flex-direction:column;justify-content:center;flex:1">
+        <div style="font-size:1.6rem;font-weight:800;margin-bottom:10px;background:linear-gradient(135deg,#cbd5e1,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2">Enterprise Grade.</div>
+        <div style="font-size:1.05rem;color:var(--text);margin-bottom:8px;font-weight:600">Built for organisations that don't compromise.</div>
+        <div style="font-size:.85rem;color:var(--c-slate);line-height:1.7;margin-bottom:28px">Unified Fleet Dashboard, Compliance Evidence Collection, Policy Settings, SSO Integration, and Centralised Reporting — for teams of 50 to 5,000.</div>
+        <div>
+          <a href="https://vaultify.live/enterprise" target="_blank" style="display:inline-block;padding:14px 32px;font-size:1rem;font-weight:700;background:linear-gradient(135deg,rgba(148,163,184,.15),rgba(203,213,225,.08));border:1px solid rgba(148,163,184,.3);border-radius:12px;color:#cbd5e1;text-decoration:none;transition:all .2s;cursor:pointer" onmouseover="this.style.boxShadow='0 0 30px rgba(148,163,184,.15)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">Contact Sales</a>
+          <button onclick="App.hideEnterpriseModal()" style="margin-left:16px;background:none;border:none;color:var(--c-slate);font:inherit;font-size:.82rem;cursor:pointer;vertical-align:middle">Maybe later</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOUR OVERLAYS -->
+  <div id="tourWelcome" class="tour-welcome" style="display:none">
+    <div class="tour-welcome-card">
+      <img src="/assets/vee-avatar.png" class="tour-welcome-avatar" alt="Vee">
+      <div class="tour-welcome-title">Welcome to Vaultify!</div>
+      <div class="tour-welcome-text">Hello! I'm Vee, your tour guide. I'll walk you through scanning, the sidebar vault picker (Choose a Vault), Review, and remediation — all locally on your machine.</div>
+      <button class="btn-primary tour-welcome-start" onclick="App.tour.beginSteps()">Start Tour</button>
+      <button class="tour-welcome-skip" onclick="App.tour.destroy()">Maybe Later</button>
+    </div>
+  </div>
+  <div id="tourBackdrop" class="tour-backdrop" style="display:none">
+    <div class="tour-backdrop-fill"></div>
+    <div class="tour-spotlight" id="tourSpotlight"></div>
+  </div>
+  <div id="tourBubble" class="tour-bubble" style="display:none">
+    <div class="tour-bubble-inner">
+      <img src="/assets/vee-avatar.png" class="tour-bubble-avatar" alt="Vee">
+      <div class="tour-bubble-content">
+        <div class="tour-bubble-title" id="tourBubbleTitle"></div>
+        <div class="tour-bubble-text" id="tourBubbleText"></div>
+      </div>
+    </div>
+    <div class="tour-bubble-footer">
+      <div class="tour-bubble-nav">
+        <button class="tour-bubble-back" id="tourBack" onclick="App.tour.prev()">Back</button>
+        <button class="btn-primary tour-bubble-next" id="tourNext" onclick="App.tour.next()">Next</button>
+      </div>
+      <span class="tour-step-counter" id="tourCounter"></span>
+      <button class="tour-bubble-skip" onclick="App.tour.destroy()">Skip Tour</button>
+    </div>
+  </div>
+
+  <script src="/assets/app.js?v=0.1.7"></script>
 </body>
 </html>
-
