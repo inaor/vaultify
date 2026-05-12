@@ -1,8 +1,13 @@
+
+
+
 # Vaultify
 
 **Find plaintext secrets. Move them to your vault. Clean your code.**
 
 Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, `.env` files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
+
+<video src="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69"></video>
 
 
 Pushing a version tag (e.g. `v0.3.0`) triggers the [Release workflow](.github/workflows/release.yml) on GitHub Actions for that repo.
