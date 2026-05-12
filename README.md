@@ -5,16 +5,6 @@
 Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, `.env` files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
 
 
-
-
-**Source (private):** [github.com/inaor/vaultify_priv](https://github.com/inaor/vaultify_priv) — clone and set `origin` to that URL when you work from a machine that should sync with GitHub.
-
-```bash
-git remote add origin https://github.com/inaor/vaultify_priv.git
-# or SSH: git@github.com:inaor/vaultify_priv.git
-git push -u origin main
-```
-
 Pushing a version tag (e.g. `v0.3.0`) triggers the [Release workflow](.github/workflows/release.yml) on GitHub Actions for that repo.
 
 ## Quick Start
