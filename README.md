@@ -28,25 +28,9 @@ On Windows, run the `.exe`; the dashboard opens at `http://localhost:9471` by de
 
 That's it. Click **Start Scan**, review findings, make decisions, apply.
 
-### Native shell branding (icon parity)
+<img width="848" height="824" alt="Untitled" src="https://github.com/user-attachments/assets/274e191c-af17-40e8-9fbf-9a228eccff5a" />
 
-Vaultify ships shell-level branding for every supported platform:
-
-- **Windows** — the icon is **embedded inside `vaultify.exe`** (multi-resolution PE resource). Title bar, taskbar, Alt-Tab, Explorer thumbnails and the 1Password unlock prompt all show the Vaultify mark automatically. Nothing to install.
-- **macOS** — download `vaultify_<ver>_darwin_<arch>.app.tar.gz` and extract; you get a `Vaultify.app` bundle with `AppIcon.icns` baked in. Drop it into `/Applications` (or anywhere) and Finder/Dock show the icon. The bare `vaultify_*_darwin_*` binary is also published if you prefer the CLI without the bundle. A standalone `Vaultify.icns` is in every release if you want to wrap your own bundle.
-- **Linux** — download `vaultify_<ver>_linux-icons.tar.gz` and unpack into your icon and applications dirs:
-
-    ```bash
-    tar xzf vaultify_*_linux-icons.tar.gz
-    cp -r linux-icons/16x16 linux-icons/22x22 linux-icons/24x24 \
-          linux-icons/32x32 linux-icons/48x48 linux-icons/64x64 \
-          linux-icons/128x128 linux-icons/256x256 linux-icons/512x512 \
-          ~/.local/share/icons/hicolor/
-    cp linux-icons/vaultify.desktop ~/.local/share/applications/
-    gtk-update-icon-cache -f ~/.local/share/icons/hicolor 2>/dev/null || true
-    ```
-
-    GNOME / KDE / XFCE then show the Vaultify icon in launchers, Activities, and Alt-Tab.
+On your report you have a number of options - **Vaultify**, **Remove** or **Junk**.
 
 ## What It Does
 
@@ -54,6 +38,12 @@ Vaultify ships shell-level branding for every supported platform:
 2. **Review** — interactive table showing each unique secret, where it appears, and a redacted preview
 3. **Decide** — for each secret: **Vaultify** (move to 1Password/AWS/HashiCorp), **Remove From Code** (redact in place), or **Dismiss**
 4. **Apply** — secrets are moved to your vault with `op://` references replacing the plaintext, or redacted with `REDACTED_BY_VAULTIFY`
+
+## Features
+
+Using the Walkthrough you can find all the app features, including Vee, your Secret Agent, her FP Finder (requires AI model token), Generating reports, follow remediation, increase your secrets catalogue and more.
+
+**Take into mind that the app is still in the making and might introduce bugs. Feel free to report them**
 
 ## Supported Vaults
 
@@ -63,10 +53,6 @@ Vaultify ships shell-level branding for every supported platform:
 | AWS Secrets Manager | Experimental | `aws` |
 | HashiCorp Vault | Experimental | `vault` |
 | Doppler | Experimental | `doppler` |
-
-## Pro licensing (JWT)
-
-Contract for Pro activation tokens (issuer, claims, `kid` rotation, subscription vs perpetual): **[docs/licensing-jwt-v1.md](docs/licensing-jwt-v1.md)**.
 
 ## Build From Source
 
@@ -87,3 +73,8 @@ pwsh ./scripts/build-release.ps1    # Windows / PowerShell equivalent
 ## License
 
 [MIT License](LICENSE)
+
+## Purpose
+
+Vaultify was made by researchers, for researchers. 
+For more about us, visit [JOES](https://www.securityjoes.com)
