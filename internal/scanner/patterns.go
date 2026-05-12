@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sync"
 )
 
 //go:embed patterns.json
@@ -30,22 +31,28 @@ type patternsFile struct {
 	Patterns []Pattern `json:"patterns"`
 }
 
-func RawPatterns() []Pattern {
-	var raw patternsFile
-	if err := json.Unmarshal(patternsJSON, &raw); err != nil {
-		return nil
-	}
-	return raw.Patterns
-}
+// Pattern registry: parse patterns.json and compile every regex exactly
+// once per process. Before this, LoadPatterns() was called from every
+// NewScanner, every RecoverPlaintext call, and every handleApply — each
+// one re-parsed the embedded JSON and recompiled ~30 regexes, which
+// showed up as avoidable allocations during bulk Apply.
+var (
+	patternsOnce     sync.Once
+	cachedRaw        []Pattern
+	cachedCompiled   []CompiledPattern
+	cachedPatternIDs map[string]int // pattern_id -> index in cachedCompiled
+)
 
-func LoadPatterns() []CompiledPattern {
+func loadPatternsLocked() {
 	var raw patternsFile
 	if err := json.Unmarshal(patternsJSON, &raw); err != nil {
 		fmt.Printf("warning: parsing patterns.json: %v\n", err)
-		return nil
+		return
 	}
+	cachedRaw = raw.Patterns
 
 	compiled := make([]CompiledPattern, 0, len(raw.Patterns))
+	ids := make(map[string]int, len(raw.Patterns))
 	for _, p := range raw.Patterns {
 		expr := p.Regex
 		if p.IgnoreCase {
@@ -56,7 +63,35 @@ func LoadPatterns() []CompiledPattern {
 			fmt.Printf("warning: compiling pattern %q: %v\n", p.ID, err)
 			continue
 		}
+		ids[p.ID] = len(compiled)
 		compiled = append(compiled, CompiledPattern{Pattern: p, Regex: re})
 	}
-	return compiled
+	cachedCompiled = compiled
+	cachedPatternIDs = ids
+}
+
+// RawPatterns returns the raw (uncompiled) pattern rows. The slice is
+// cached; callers must not mutate it.
+func RawPatterns() []Pattern {
+	patternsOnce.Do(loadPatternsLocked)
+	return cachedRaw
+}
+
+// LoadPatterns returns the compiled patterns. Kept as a function name
+// for backward compatibility with older call sites; cheap after the
+// first invocation.
+func LoadPatterns() []CompiledPattern {
+	patternsOnce.Do(loadPatternsLocked)
+	return cachedCompiled
+}
+
+// PatternByID returns the compiled pattern for the given id, or nil if
+// unknown. Lookup is O(1) via the registry map.
+func PatternByID(id string) *CompiledPattern {
+	patternsOnce.Do(loadPatternsLocked)
+	idx, ok := cachedPatternIDs[id]
+	if !ok {
+		return nil
+	}
+	return &cachedCompiled[idx]
 }

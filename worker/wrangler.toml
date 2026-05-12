@@ -1,0 +1,44 @@
+name = "vaultify-license"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+# Public configuration. Anything sensitive lives in `wrangler secret put`.
+[vars]
+# JWT contract pieces — must match docs/licensing-jwt-v1.md and the
+# constants in internal/license/keys_dev.go (DefaultIssuer / DefaultAudience).
+ISSUER             = "https://vaultify.live"
+AUDIENCE           = "vaultify-pro"
+KID                = "vf-pro-prod-2026-04"
+SCHEMA_VERSION     = "1"
+
+# Default subscription window when the webhook payload doesn't carry an
+# explicit billed-through date. 365d aligns with annual subscriptions.
+LICENSE_DAYS_DEFAULT = "365"
+
+# Email branding (used only when RESEND_API_KEY secret is also set).
+# SUPPORT_EMAIL is the body-of-the-email reply target. EMAIL_FROM is
+# the sender Resend uses; the local part can be anything as long as
+# vaultify.live is verified in Resend's domain settings.
+SUPPORT_EMAIL  = "pro@vaultify.live"
+EMAIL_FROM     = "Vaultify Pro <pro@vaultify.live>"
+
+# Production routing. Customers hit https://license.vaultify.live/...
+# Cloudflare's Custom Domain feature wires up DNS + edge cert + Worker
+# binding in one step when `wrangler deploy` runs — no manual record
+# in the DNS or Workers Routes UI required. `vaultify.live` must be
+# in your Cloudflare account before the first deploy.
+[[routes]]
+pattern        = "license.vaultify.live"
+custom_domain  = true
+
+# Required runtime secrets (set via `wrangler secret put NAME`):
+#   ED25519_PRIVATE_KEY_B64   base64-no-padding 64-byte Go ed25519.PrivateKey
+#                             (the same value tools/keygen prints; CF's WebCrypto
+#                              uses the first 32 bytes as the seed.)
+#   BASE44_WEBHOOK_SECRET     HMAC-SHA256 secret Base44 signs webhook bodies with
+#   ADMIN_TOKEN               opaque bearer token for /admin/issue (support flow)
+#
+# Optional:
+#   RESEND_API_KEY            if set, Worker emails the token to the customer.
+#                             If absent, the token is returned in the JSON
+#                             response and Base44 (or you) decide how to deliver.

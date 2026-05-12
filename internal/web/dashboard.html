@@ -1,14 +1,22 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Vaultify</title>
-  <link rel="stylesheet" href="/assets/style.css?v=0.1.7">
+  <link rel="icon" type="image/png" href="/assets/vaultify_logo.png">
+  <link rel="apple-touch-icon" href="/assets/vaultify_logo.png">
+  <link rel="stylesheet" href="/assets/style.css?v=0.6.2">
 </head>
 <body>
   <div class="sidebar">
-    <div class="brand">Vaultify <span>v0.1.7</span></div>
+    <div class="brand">
+      <div class="brand-logos-row">
+        <img class="brand-mark" src="/assets/vaultify_logo.png" alt="" decoding="async" />
+        <span class="brand-text">Vaultify</span>
+      </div>
+      <span class="brand-version" id="brandVersion">v0.3.0</span>
+    </div>
     <nav class="sidebar-nav-inner">
       <a href="#dashboard" data-page="dashboard" class="active">
         <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
@@ -23,29 +31,21 @@
         <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
         Reports <span class="badge">0</span>
       </a>
+      <a href="#posture" data-page="posture">
+        <svg viewBox="0 0 24 24"><path d="M12 2L4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3zm0 4.7l5 1.9V11c0 3.4-2.1 7-5 8.1V6.7zM5 11V8.6l5-1.9v12.4C7.1 18 5 14.4 5 11z"/></svg>
+        Posture
+      </a>
       <a href="#catalogue" data-page="catalogue">
         <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
         Secret Catalogue <span class="badge" id="navCatBadge">0</span>
-      </a>
-      <a href="#" onclick="event.preventDefault();App.showEnterpriseModal()" class="ent-nav-item">
-        <svg viewBox="0 0 24 24"><path d="M19 5v2h-4V5h4M9 5v6H5V5h4m10 8v6h-4v-6h4M9 17v2H5v-2h4M21 3h-8v6h8V3zM11 3H3v10h8V3zm10 8h-8v10h8V11zM11 15H3v6h8v-6z"/></svg>
-        Unified Dashboard <span class="ent-badge">&#x1F48E;</span>
-      </a>
-      <a href="#" onclick="event.preventDefault();App.showEnterpriseModal()" class="ent-nav-item">
-        <svg viewBox="0 0 24 24"><path d="M23 12l-2.44-2.78.34-3.68-3.61-.82-1.89-3.18L12 3 8.6 1.54 6.71 4.72l-3.61.81.34 3.68L1 12l2.44 2.78-.34 3.69 3.61.82 1.89 3.18L12 21l3.4 1.46 1.89-3.18 3.61-.82-.34-3.68L23 12zm-10 5h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-        Compliance <span class="ent-badge">&#x1F48E;</span>
-      </a>
-      <a href="#" onclick="event.preventDefault();App.showEnterpriseModal()" class="ent-nav-item">
-        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.611 3.611 0 0112 15.6z"/></svg>
-        Settings <span class="ent-badge">&#x1F48E;</span>
       </a>
       <a href="#version" data-page="version">
         <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
         Version
       </a>
-      <a href="#audit" data-page="audit">
-        <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-        Audit Log
+      <a href="#activity" data-page="activity">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg>
+        Activity <span class="logs-live-dot" id="logsLiveDot" title="Live"></span>
       </a>
       <a href="#docs" data-page="docs">
         <svg viewBox="0 0 24 24"><path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/></svg>
@@ -95,10 +95,10 @@
                   Scan Specific Folder
                   <span class="scan-menu-hint">Choose a directory to scan</span>
                 </div>
-                <div class="scan-menu-item" onclick="App.hideScanMenu();App.showProModal()" style="opacity:.7">
+                <div class="scan-menu-item" onclick="App.hideScanMenu();App.showToast('Scheduled scans are not implemented in this build yet.', 'info')" style="opacity:.65">
                   <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
-                  Schedule Scan <span style="margin-left:auto;font-size:.72rem">&#x1F451;</span>
-                  <span class="scan-menu-hint">Automate recurring scans</span>
+                  Schedule Scan
+                  <span class="scan-menu-hint">Coming in a future release</span>
                 </div>
               </div>
             </div>
@@ -117,6 +117,14 @@
             <span class="hero-elapsed" id="heroElapsed" style="display:none">0:00</span>
             <span class="hero-throughput" id="heroThroughput" style="display:none"></span>
           </div>
+        </div>
+
+        <div id="freeTierCapBanner" style="display:none;margin:12px 0;padding:12px 16px;border-radius:10px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.1);font-size:.86rem;line-height:1.55;color:var(--text);align-items:flex-start;gap:12px" class="vf-cap-banner">
+          <span aria-hidden="true" style="font-size:1.15rem;flex-shrink:0;line-height:1">&#x26A0;&#xFE0F;</span>
+          <div style="flex:1;min-width:0">
+            This scan stopped at <strong id="freeTierCapBannerN">10,000</strong> eligible files (configured file cap). Other paths were not scanned.
+          </div>
+          <button type="button" onclick="App.dismissCapBanner()" class="tb-btn" style="padding:3px 9px;font-size:.68rem;flex-shrink:0" title="Dismiss">Dismiss</button>
         </div>
 
         <!-- Folder Picker Panel -->
@@ -159,7 +167,7 @@
             <div class="gauge-stats">
               <div class="gauge-title">Scan Progress</div>
               <div class="gauge-row"><span class="gl">Files scanned</span><span class="gv" id="gFiles">0 / 0</span></div>
-              <div class="gauge-row"><span class="gl">File cap</span><span class="gv" id="gCap">100,000</span></div>
+              <div class="gauge-row"><span class="gl">File cap</span><span class="gv" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end"><span id="gCap">Unlimited</span></span></div>
               <div id="currentPathRow" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
                 <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Scanning</div>
                 <div id="currentPath" style="font-size:.72rem;font-family:ui-monospace,Consolas,monospace;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px"></div>
@@ -185,7 +193,7 @@
         <!-- Pattern Graph + Findings Explorer -->
         <div class="feed-row">
           <div class="card feed-card">
-            <div class="card-title" style="justify-content:space-between"><span>Pattern Graph <span class="badge" id="patBadge">0 types</span></span><button class="tb-btn" onclick="App.showProModal()" style="font-size:.68rem;padding:3px 10px;opacity:.7" id="btnExpandGraph">Expand &#x1F451;</button></div>
+            <div class="card-title" style="justify-content:space-between"><span>Pattern Graph <span class="badge" id="patBadge">0 types</span></span><button class="tb-btn" onclick="App.expandPatternGraph()" style="font-size:.68rem;padding:3px 10px" id="btnExpandGraph">Expand</button></div>
             <div id="patGraphHint" class="pat-graph-hint" style="display:none;padding:0 4px 8px;font-size:.68rem;color:var(--c-slate);line-height:1.35"></div>
             <div id="patternGraph" style="position:relative;min-height:300px"><div class="empty-msg">Start a scan to see patterns.</div></div>
           </div>
@@ -204,11 +212,16 @@
       <div class="shell">
         <div class="toolbar">
           <input type="search" id="reviewSearch" placeholder="Filter by pattern, folder, file, path, preview..." oninput="App.reviewPage=0;App.renderReview()" style="flex:1;min-width:200px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 14px;font:inherit;font-size:.9rem">
-          <button class="tb-btn" onclick="App.showProModal()" style="font-size:.78rem;padding:7px 14px;opacity:.7">Export CSV &#x1F451;</button>
+          <button class="tb-btn" onclick="App.showToast('CSV export is not wired up in this build yet.', 'info')" style="font-size:.78rem;padding:7px 14px;opacity:.85">Export CSV</button>
           <button class="btn-primary" id="btnApply" onclick="App.showApplyModal()" style="font-size:.9rem;padding:9px 20px">Apply Decisions</button>
         </div>
+        <div id="reviewCapStrip" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:8px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.1);font-size:.82rem;line-height:1.45;color:var(--text);align-items:center;gap:10px;flex-wrap:wrap" class="vf-review-cap">
+          <span aria-hidden="true">&#x26A0;&#xFE0F;</span>
+          <span>This session hit the configured scan file cap; not every path was scanned.</span>
+          <button type="button" class="tb-btn" onclick="App.dismissReviewCapStrip()" style="font-size:.68rem;padding:3px 8px;margin-left:auto">Dismiss</button>
+        </div>
         <div id="bulkActions" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-          <button class="tb-btn" onclick="App.runVeeFpFinder()" style="font-size:.75rem;padding:5px 12px;border-color:var(--c-violet);color:var(--c-violet)" title="Requires vault open + AI provider key in Vee"><span aria-hidden="true">&#x2728;</span> Vee FP Finder</button>
+          <button class="tb-btn" onclick="App.runVeeFpFinder()" style="font-size:.75rem;padding:5px 12px;border-color:var(--c-violet);color:var(--c-violet)" title="AI-assisted false-positive triage"><span aria-hidden="true">&#x2728;</span> Vee FP Finder</button>
           <button class="tb-btn" onclick="App.bulkDecision('critical','vault')" style="font-size:.75rem;padding:5px 12px;border-color:var(--ok);color:var(--ok)"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg>Vaultify All Critical</button>
           <button class="tb-btn" onclick="App.bulkDecision('high','vault')" style="font-size:.75rem;padding:5px 12px;border-color:var(--orange);color:var(--orange)"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg>Vaultify All High</button>
           <button class="tb-btn" onclick="App.bulkDecision('low','graveyard')" style="font-size:.75rem;padding:5px 12px"><span style="vertical-align:-2px;margin-right:4px" aria-hidden="true">&#x1F5D1;&#xFE0F;</span>Junkyard All Low</button>
@@ -239,12 +252,111 @@
       </div>
     </div>
 
-    <!-- AUDIT LOG PAGE -->
-    <div class="page" id="page-audit">
+    <!-- ACTIVITY PAGE — merged Live stream + Audit ledger -->
+    <div class="page" id="page-activity">
       <div class="shell" style="padding-top:24px">
         <div class="card">
-          <div class="card-title" style="justify-content:space-between"><span>Audit Log</span><button class="tb-btn" onclick="App.showProModal()" style="font-size:.72rem;padding:4px 12px;opacity:.7">Export Audit Trail &#x1F451;</button></div>
-          <div id="auditContent"><div class="empty-msg">No actions recorded yet.</div></div>
+          <div class="card-title" style="justify-content:space-between">
+            <span>Activity</span>
+            <div class="activity-view-toggle" role="tablist" aria-label="Activity view">
+              <button class="activity-view-btn active" data-view="live" onclick="App.setActivityView('live')" role="tab">
+                Live stream <span class="logs-live-dot" id="activityLiveDot" title="Live"></span>
+              </button>
+              <button class="activity-view-btn" data-view="audit" onclick="App.setActivityView('audit')" role="tab">
+                Audit ledger
+              </button>
+            </div>
+          </div>
+          <div class="logs-hint">
+            <strong>Live stream</strong> shows everything the server is doing right now (HTTP, <code>op</code> subprocess traces, vault auth transitions, Vee chat, scan progress, audit events) — correlate flows by <code>rid</code>. <strong>Audit ledger</strong> is the persistent governance record kept on disk for export and review. Same audit events appear in both views; only retention and filtering differ.
+          </div>
+
+          <!-- Live stream view (default) -->
+          <div id="activityLiveView">
+            <div class="logs-toolbar" style="margin-top:8px">
+              <span class="badge" id="logsCountBadge" style="margin-right:6px">0</span>
+              <select id="logsCategorySelect" class="logs-category-select" onchange="App.setLogsCategory(this.value)" aria-label="Category filter">
+                <option value="all">All categories</option>
+                <option value="http">HTTP requests</option>
+                <option value="op">1Password CLI</option>
+                <option value="vault_auth">Vault auth</option>
+                <option value="vee">Vee / LLM</option>
+                <option value="audit">Audit events</option>
+                <option value="posture">Posture</option>
+                <option value="scan">Scan</option>
+              </select>
+              <div class="logs-level-group" role="group" aria-label="Log level filter">
+                <button class="logs-level-btn" data-level="debug" onclick="App.setLogsLevel('debug')">Debug</button>
+                <button class="logs-level-btn active" data-level="info" onclick="App.setLogsLevel('info')">Info</button>
+                <button class="logs-level-btn" data-level="warn" onclick="App.setLogsLevel('warn')">Warn</button>
+                <button class="logs-level-btn" data-level="error" onclick="App.setLogsLevel('error')">Error</button>
+              </div>
+              <button class="tb-btn" id="btnLogsPause" onclick="App.toggleLogsPause()" style="font-size:.72rem;padding:4px 12px">Pause</button>
+              <button class="tb-btn" onclick="App.copyLogs()" style="font-size:.72rem;padding:4px 12px">Copy</button>
+              <button class="tb-btn" onclick="App.clearLogs()" style="font-size:.72rem;padding:4px 12px">Clear</button>
+            </div>
+            <pre id="logsOutput" class="logs-pre" aria-live="polite">Connecting to log stream...</pre>
+          </div>
+
+          <!-- Audit ledger view -->
+          <div id="activityAuditView" style="display:none;margin-top:8px">
+            <div class="logs-toolbar" style="margin-bottom:10px">
+              <span style="color:var(--muted);font-size:.78rem">Persistent record of user-facing actions (scans, decisions, vault changes, Vee key lifecycle, posture merges).</span>
+              <button class="tb-btn" onclick="App.showToast('Audit export is not wired up in this build yet.', 'info')" style="font-size:.72rem;padding:4px 12px;opacity:.85;margin-left:auto">Export Audit Trail</button>
+            </div>
+            <div id="auditContent"><div class="empty-msg">No actions recorded yet.</div></div>
+          </div>
+        </div>
+        <footer class="vaultify-footer"></footer>
+      </div>
+    </div>
+
+    <!-- POSTURE PAGE -->
+    <div class="page" id="page-posture">
+      <div class="shell" style="padding-top:24px">
+        <div class="card">
+          <div class="card-title" style="justify-content:space-between">
+            <span>Accumulated Posture</span>
+            <button class="tb-btn" onclick="App.refreshPosture()" style="font-size:.72rem;padding:4px 12px">Refresh</button>
+          </div>
+          <div class="post-hint">
+            Rolling 30-day fingerprint of every distinct finding seen on this endpoint. Each row is a unique <code>pattern + path + value-hash</code>. When a fingerprint disappears from a re-scanned root, it transitions to <strong>Removed</strong> and stays visible for the rest of the window so you can track remediation drift.
+          </div>
+          <div id="postureSummary"></div>
+
+          <div class="post-toolbar">
+            <div class="logs-level-group" role="group" aria-label="Status filter">
+              <button class="logs-level-btn active" data-pf="all" onclick="App.setPostureStatusFilter('all');document.querySelectorAll('[data-pf]').forEach(b=>b.classList.toggle('active',b.dataset.pf==='all'));">All</button>
+              <button class="logs-level-btn" data-pf="present" onclick="App.setPostureStatusFilter('present');document.querySelectorAll('[data-pf]').forEach(b=>b.classList.toggle('active',b.dataset.pf==='present'));">Present</button>
+              <button class="logs-level-btn" data-pf="deleted" onclick="App.setPostureStatusFilter('deleted');document.querySelectorAll('[data-pf]').forEach(b=>b.classList.toggle('active',b.dataset.pf==='deleted'));">Removed</button>
+            </div>
+            <select class="logs-category-select" onchange="App.setPostureSeverityFilter(this.value)" aria-label="Severity filter">
+              <option value="all">All severities</option>
+              <option value="high">High only</option>
+              <option value="medium">Medium only</option>
+              <option value="low">Low only</option>
+            </select>
+            <input id="postureSearch" class="post-search" type="search" placeholder="Filter by pattern or path…" oninput="App.setPostureSearch(this.value)" />
+            <span class="post-filtered-meta"><span id="postureFilteredCount">0</span> shown</span>
+          </div>
+
+          <div class="post-table-wrap">
+            <table class="post-table">
+              <thead>
+                <tr>
+                  <th>Severity</th>
+                  <th>Status</th>
+                  <th>Pattern</th>
+                  <th>Path</th>
+                  <th>Preview</th>
+                  <th>Timeline</th>
+                </tr>
+              </thead>
+              <tbody id="postureTbody">
+                <tr><td colspan="6" class="post-empty">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
         <footer class="vaultify-footer"></footer>
       </div>
@@ -256,7 +368,7 @@
         <div class="card">
           <div class="card-title" style="justify-content:space-between">
             <span>Secret Catalogue <span class="badge" id="catalogueBadge">0 patterns</span></span>
-            <button class="tb-btn" onclick="App.showProModal()" style="font-size:.72rem;padding:4px 12px;opacity:.7">Add Custom Patterns &#x1F451;</button>
+            <button class="tb-btn" onclick="App.showToast('Custom detection patterns are not editable in the UI yet.', 'info')" style="font-size:.72rem;padding:4px 12px;opacity:.85">Add Custom Patterns</button>
           </div>
           <div style="margin-bottom:14px">
             <input type="search" id="catalogueSearch" placeholder="Search patterns by name, ID, or severity..." oninput="App.cataloguePage=0;App.renderCatalogue()" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 14px;font:inherit;font-size:.88rem">
@@ -379,6 +491,21 @@
     </div>
   </div>
 
+  <!-- VEE VAULT SETTINGS MODAL -->
+  <div id="veeSettingsOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:105;align-items:center;justify-content:center">
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;max-width:480px;width:94vw;max-height:80vh;overflow-y:auto">
+      <div style="padding:18px 22px;border-bottom:1px solid var(--border)">
+        <h2 style="font-size:1.1rem;font-weight:700;margin:0">Vee vault settings</h2>
+        <p style="font-size:.78rem;color:var(--muted);margin:8px 0 0;line-height:1.5">Choose the 1Password vault Vee reads and writes LLM keys in. Default is <code style="color:var(--accent)">Vaultify</code>.</p>
+      </div>
+      <div id="veeSettingsBody" style="padding:18px 22px">Loading vaults...</div>
+      <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+        <button class="tb-btn" onclick="App.closeVeeSettings()">Cancel</button>
+        <button class="btn-primary" id="btnSaveVeeSettings" onclick="App.saveVeeSettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- APPLY MODAL -->
   <div id="applyOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center">
     <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;max-width:520px;width:94vw;max-height:80vh;overflow-y:auto">
@@ -413,9 +540,13 @@
     <div class="vee-header">
       <img src="/assets/vee-avatar.png" class="vee-avatar" alt="Vee" onclick="App.tour.start()" style="cursor:pointer" title="Start Walkthrough">
       <div class="vee-name">Vee <span>Secrets Agent</span></div>
+      <button class="vee-settings-btn" onclick="App.openVeeSettings()" title="Vee vault settings" aria-label="Vee vault settings">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.44.17-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      </button>
     </div>
     <div class="vee-providers" id="veeProviders"></div>
     <div class="vee-prov-label" id="veeProvLabel">Select a provider to start</div>
+    <div class="vee-prov-provenance" id="veeProvProvenance" style="display:none"></div>
     <div id="veeKeyArea"></div>
     <div class="vee-chat" id="veeChat">
       <div class="vee-msg vee"><div class="msg-name">Vee</div><div class="msg-body">Hello! I'm Vee, your Vaultify security assistant. Run a scan and I'll help you understand your findings and prioritise remediation. Choose an AI provider above to get started.</div></div>
@@ -424,7 +555,7 @@
       <button class="vee-summary-btn" id="veeSummaryBtn" onclick="App.veeSummary()" disabled style="opacity:.35;cursor:not-allowed">Create Remediation Summary</button>
     </div>
     <div class="vee-input-area">
-      <textarea class="vee-input" id="veeInput" rows="1" disabled placeholder="Select an AI provider above to start chatting" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();App.veeSend()}"></textarea>
+      <textarea class="vee-input" id="veeInput" rows="1" disabled placeholder="Select an AI provider above to start chatting"></textarea>
       <button class="vee-send" id="veeSendBtn" onclick="App.veeSend()" disabled>Send</button>
     </div>
   </div>
@@ -453,44 +584,12 @@
     </div>
   </div>
 
-  <!-- PRO MODAL -->
-  <div id="proModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center">
-    <div style="background:var(--panel-solid);border:1px solid rgba(251,191,36,.25);border-radius:20px;max-width:640px;width:92vw;box-shadow:0 8px 40px rgba(0,0,0,.5),0 0 40px rgba(251,191,36,.08);animation:slideUp .5s ease;overflow:hidden;display:flex">
-      <img src="/assets/vee-pro.png" style="width:260px;height:auto;object-fit:cover;object-position:center top;flex-shrink:0;border-right:1px solid rgba(251,191,36,.15)">
-      <div style="padding:40px 36px;display:flex;flex-direction:column;justify-content:center;flex:1">
-        <div style="font-size:1.6rem;font-weight:800;margin-bottom:10px;background:linear-gradient(135deg,#fbbf24,#fb923c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2">So you're after going Pro?</div>
-        <div style="font-size:1.05rem;color:var(--text);margin-bottom:8px;font-weight:600">Good choice. Let's go.</div>
-        <div style="font-size:.85rem;color:var(--muted);line-height:1.7;margin-bottom:28px">Expanded Pattern Graph with zoom and inspect, Export CSV, Share Reports, Custom Patterns, Scheduled Scans, and more — power tools for security-conscious individuals and teams.</div>
-        <div>
-          <a href="https://vaultify.live/pro" target="_blank" style="display:inline-block;padding:14px 32px;font-size:1rem;font-weight:700;background:linear-gradient(135deg,rgba(251,191,36,.2),rgba(251,146,60,.15));border:1px solid rgba(251,191,36,.4);border-radius:12px;color:#fbbf24;text-decoration:none;transition:all .2s;cursor:pointer" onmouseover="this.style.boxShadow='0 0 24px rgba(251,191,36,.2)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">Explore Vaultify Pro</a>
-          <button onclick="App.hideProModal()" style="margin-left:16px;background:none;border:none;color:var(--muted);font:inherit;font-size:.82rem;cursor:pointer;vertical-align:middle">Maybe later</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ENTERPRISE MODAL -->
-  <div id="enterpriseModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:200;align-items:center;justify-content:center">
-    <div style="background:linear-gradient(135deg,#0f1520,#1a2030);border:1px solid rgba(148,163,184,.2);border-radius:20px;max-width:640px;width:92vw;box-shadow:0 8px 60px rgba(0,0,0,.6),0 0 80px rgba(148,163,184,.06);animation:slideUp .5s ease;overflow:hidden;display:flex">
-      <img src="/assets/vee-enterprise.png" style="width:260px;height:auto;object-fit:cover;object-position:center top;flex-shrink:0;border-right:1px solid rgba(148,163,184,.1)">
-      <div style="padding:40px 36px;display:flex;flex-direction:column;justify-content:center;flex:1">
-        <div style="font-size:1.6rem;font-weight:800;margin-bottom:10px;background:linear-gradient(135deg,#cbd5e1,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2">Enterprise Grade.</div>
-        <div style="font-size:1.05rem;color:var(--text);margin-bottom:8px;font-weight:600">Built for organisations that don't compromise.</div>
-        <div style="font-size:.85rem;color:var(--c-slate);line-height:1.7;margin-bottom:28px">Unified Fleet Dashboard, Compliance Evidence Collection, Policy Settings, SSO Integration, and Centralised Reporting — for teams of 50 to 5,000.</div>
-        <div>
-          <a href="https://vaultify.live/enterprise" target="_blank" style="display:inline-block;padding:14px 32px;font-size:1rem;font-weight:700;background:linear-gradient(135deg,rgba(148,163,184,.15),rgba(203,213,225,.08));border:1px solid rgba(148,163,184,.3);border-radius:12px;color:#cbd5e1;text-decoration:none;transition:all .2s;cursor:pointer" onmouseover="this.style.boxShadow='0 0 30px rgba(148,163,184,.15)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">Contact Sales</a>
-          <button onclick="App.hideEnterpriseModal()" style="margin-left:16px;background:none;border:none;color:var(--c-slate);font:inherit;font-size:.82rem;cursor:pointer;vertical-align:middle">Maybe later</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- TOUR OVERLAYS -->
   <div id="tourWelcome" class="tour-welcome" style="display:none">
     <div class="tour-welcome-card">
       <img src="/assets/vee-avatar.png" class="tour-welcome-avatar" alt="Vee">
       <div class="tour-welcome-title">Welcome to Vaultify!</div>
-      <div class="tour-welcome-text">Hello! I'm Vee, your tour guide. I'll walk you through scanning, the sidebar vault picker (Choose a Vault), Review, and remediation — all locally on your machine.</div>
+      <div class="tour-welcome-text">Hello! I'm Vee, your tour guide. I'll walk you through scanning, the sidebar vault picker (Choose a Vault), Review, and remediation &mdash; all locally on your machine. <strong>Important:</strong> when you Apply and move live secrets into 1Password or replace them with <code>op://</code> references, apps that read those files at runtime may break until you point them at the vault or update configuration.</div>
       <button class="btn-primary tour-welcome-start" onclick="App.tour.beginSteps()">Start Tour</button>
       <button class="tour-welcome-skip" onclick="App.tour.destroy()">Maybe Later</button>
     </div>
@@ -517,6 +616,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=0.1.7"></script>
+  <script type="module" src="/assets/app.js?v=0.6.2"></script>
 </body>
 </html>

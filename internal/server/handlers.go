@@ -1,13 +1,13 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,9 +18,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vaultify/vaultify/internal/buildinfo"
+	"github.com/vaultify/vaultify/internal/db"
 	"github.com/vaultify/vaultify/internal/exclusions"
 	"github.com/vaultify/vaultify/internal/scanner"
 	"github.com/vaultify/vaultify/internal/session"
+	"github.com/vaultify/vaultify/internal/validation"
+	"github.com/vaultify/vaultify/internal/vault"
 )
 
 // ------------------------------------------------------------------
@@ -42,12 +46,13 @@ type applyRequest struct {
 }
 
 type applyItem struct {
-	MatchSHA256 string         `json:"match_sha256"`
-	Action      string         `json:"action"`
-	PatternID   string         `json:"pattern_id"`
-	Locations   []applyItemLoc `json:"locations"`
-	ItemName    string         `json:"item_name"`
-	ApiURL      string         `json:"api_url"`
+	MatchSHA256  string         `json:"match_sha256"`
+	Action       string         `json:"action"`
+	PatternID    string         `json:"pattern_id"`
+	Locations    []applyItemLoc `json:"locations"`
+	ItemName     string         `json:"item_name"`
+	ApiURL       string         `json:"api_url"`
+	GoodPractice bool           `json:"good_practice,omitempty"`
 }
 
 type applyItemLoc struct {
@@ -82,7 +87,7 @@ type vaultCreateRequest struct {
 }
 
 type decisionsSaveRequest struct {
-	SessionID string     `json:"sessionId"`
+	SessionID string      `json:"sessionId"`
 	Decisions []applyItem `json:"decisions"`
 }
 
@@ -91,14 +96,15 @@ type decisionsSaveRequest struct {
 // ------------------------------------------------------------------
 
 type scanState struct {
-	mu        sync.Mutex
-	Running   bool             `json:"running"`
-	SessionID string           `json:"sessionId"`
-	Progress  int              `json:"progress"`
-	Total     int              `json:"total"`
-	Findings  []scanner.Finding `json:"findings"`
-	ScanType  string           `json:"scan_type"`
-	cancel    context.CancelFunc
+	mu             sync.Mutex
+	Running        bool              `json:"running"`
+	SessionID      string            `json:"sessionId"`
+	Progress       int               `json:"progress"`
+	Total          int               `json:"total"`
+	Findings       []scanner.Finding `json:"findings"`
+	ScanType       string            `json:"scan_type"`
+	LastScanCapped bool              `json:"-"`
+	cancel         context.CancelFunc
 }
 
 func (s *scanState) snapshot() any {
@@ -109,18 +115,27 @@ func (s *scanState) snapshot() any {
 		safe[i] = f
 		safe[i].Value = ""
 	}
+	cap := buildinfo.FileCapForAPI()
 	return struct {
-		Running   bool              `json:"running"`
-		SessionID string            `json:"sessionId"`
-		Progress  int               `json:"progress"`
-		Total     int               `json:"total"`
-		Findings  []scanner.Finding `json:"findings"`
+		Running    bool              `json:"running"`
+		SessionID  string            `json:"sessionId"`
+		Progress   int               `json:"progress"`
+		Total      int               `json:"total"`
+		Findings   []scanner.Finding `json:"findings"`
+		ScanType   string            `json:"scan_type,omitempty"`
+		Edition    string            `json:"edition"`
+		FileCap    int               `json:"file_cap"`
+		ScanCapped bool              `json:"scan_capped"`
 	}{
-		Running:   s.Running,
-		SessionID: s.SessionID,
-		Progress:  s.Progress,
-		Total:     s.Total,
-		Findings:  safe,
+		Running:    s.Running,
+		SessionID:  s.SessionID,
+		Progress:   s.Progress,
+		Total:      s.Total,
+		Findings:   safe,
+		ScanType:   s.ScanType,
+		Edition:    buildinfo.Edition(),
+		FileCap:    cap,
+		ScanCapped: s.LastScanCapped,
 	}
 }
 
@@ -170,6 +185,7 @@ func (srv *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 	srv.state.Total = 0
 	srv.state.Findings = nil
 	srv.state.ScanType = scanType
+	srv.state.LastScanCapped = false
 	srv.state.cancel = cancel
 	srv.state.mu.Unlock()
 
@@ -224,33 +240,81 @@ func (srv *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	patterns := scanner.LoadPatterns()
+	// scanner.PatternByID uses a sync.Once-cached registry; no
+	// per-request JSON parse or regex compile.
 	results := make([]applyResult, 0, len(req.Items))
 
 	hasVaultItems := false
 	for _, item := range req.Items {
-		if item.Action == "vault" { hasVaultItems = true; break }
+		if item.Action == "vault" {
+			hasVaultItems = true
+			break
+		}
 	}
-	if hasVaultItems && req.VaultName != "" {
-		ensureVaultExists(req.VaultName)
+	back := srv.activeBackend()
+	if hasVaultItems {
+		if !back.SupportsSecretApply() {
+			httpError(w, http.StatusBadRequest, "moving secrets into a vault requires 1Password as the active vault in the sidebar (Choose a Vault). Select 1Password, connect the CLI, then try Apply again.")
+			return
+		}
+		if req.VaultName != "" {
+			back.EnsureVaultExists(req.VaultName)
+		}
 	}
 
 	for _, item := range req.Items {
 		res := applyResult{MatchSHA256: item.MatchSHA256, Action: item.Action, OK: true}
 		switch item.Action {
 		case "remove":
-			var pat *scanner.CompiledPattern
-			for i := range patterns {
-				if patterns[i].ID == item.PatternID {
-					pat = &patterns[i]
+			pat := scanner.PatternByID(item.PatternID)
+			redacted := 0
+			for _, loc := range item.Locations {
+				if loc.FullPath == "" {
+					continue
+				}
+				if !srv.applyLocationAllowed(req.SessionID, item.MatchSHA256, loc.FullPath, loc.LineNumber) {
+					res.OK = false
+					res.Error = "path is not part of this scan session"
 					break
 				}
+				var ok bool
+				var err error
+				if pat != nil {
+					ok, err = redactFile(loc.FullPath, loc.LineNumber, pat.Regex, item.MatchSHA256)
+				} else {
+					ok, err = redactFileByPatternID(loc.FullPath, loc.LineNumber, item.PatternID, item.MatchSHA256)
+				}
+				if err != nil {
+					res.OK = false
+					res.Error = err.Error()
+				} else if ok {
+					redacted++
+				}
 			}
-			if pat == nil {
+			res.Detail = fmt.Sprintf("%d file(s) redacted", redacted)
+		case "vault":
+			if req.VaultName == "" {
 				res.OK = false
-				res.Error = "pattern not found: " + item.PatternID
+				res.Error = "no vault name specified"
 			} else {
-				redacted := 0
+				pat := scanner.PatternByID(item.PatternID)
+				plaintext := srv.findPlaintext(req.SessionID, item.MatchSHA256)
+				if plaintext == "" {
+					res.OK = false
+					res.Error = "plaintext not found for this secret"
+					break
+				}
+				title := item.ItemName
+				if title == "" {
+					title = item.PatternID
+				}
+				itemID, err := back.CreateCredentialItem(req.VaultName, title, plaintext, item.ApiURL)
+				if err != nil {
+					res.OK = false
+					res.Error = err.Error()
+					break
+				}
+				ref := back.CredentialReference(req.VaultName, itemID)
 				for _, loc := range item.Locations {
 					if loc.FullPath == "" {
 						continue
@@ -260,68 +324,20 @@ func (srv *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 						res.Error = "path is not part of this scan session"
 						break
 					}
-					ok, err := redactFile(loc.FullPath, loc.LineNumber, pat.Regex, item.MatchSHA256)
-					if err != nil {
-						res.OK = false
-						res.Error = err.Error()
-					} else if ok {
-						redacted++
+					var rerr error
+					if pat != nil {
+						_, rerr = replaceSecretInFile(loc.FullPath, loc.LineNumber, pat.Regex, item.MatchSHA256, ref)
+					} else {
+						_, rerr = replaceSecretInFileByPatternID(loc.FullPath, loc.LineNumber, item.PatternID, item.MatchSHA256, ref)
 					}
-				}
-				res.Detail = fmt.Sprintf("%d file(s) redacted", redacted)
-			}
-		case "vault":
-			if req.VaultName == "" {
-				res.OK = false
-				res.Error = "no vault name specified"
-			} else {
-				var pat *scanner.CompiledPattern
-				for i := range patterns {
-					if patterns[i].ID == item.PatternID {
-						pat = &patterns[i]
+					if rerr != nil {
+						res.OK = false
+						res.Error = rerr.Error()
 						break
 					}
 				}
-				if pat == nil {
-					res.OK = false
-					res.Error = "pattern not found: " + item.PatternID
-					break
-				}
-				plaintext := srv.findPlaintext(req.SessionID, item.MatchSHA256)
-				if plaintext == "" {
-					res.OK = false
-					res.Error = "plaintext not found for this secret"
-				} else {
-					title := item.ItemName
-					if title == "" {
-						title = item.PatternID
-					}
-					itemID, err := createOpItem(req.VaultName, title, plaintext, item.ApiURL)
-					if err != nil {
-						res.OK = false
-						res.Error = err.Error()
-					} else {
-						ref := fmt.Sprintf("op://%s/%s/credential", req.VaultName, itemID)
-						for _, loc := range item.Locations {
-							if loc.FullPath == "" {
-								continue
-							}
-							if !srv.applyLocationAllowed(req.SessionID, item.MatchSHA256, loc.FullPath, loc.LineNumber) {
-								res.OK = false
-								res.Error = "path is not part of this scan session"
-								break
-							}
-							_, err := replaceSecretInFile(loc.FullPath, loc.LineNumber, pat.Regex, item.MatchSHA256, ref)
-							if err != nil {
-								res.OK = false
-								res.Error = err.Error()
-								break
-							}
-						}
-						if res.OK {
-							res.Detail = ref
-						}
-					}
+				if res.OK {
+					res.Detail = ref
 				}
 			}
 		case "dismiss", "graveyard":
@@ -333,14 +349,30 @@ func (srv *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		results = append(results, res)
 	}
 
-	// Reports remediation counts only successful vault/remove (see remediation_applied.json).
+	// Reports remediation counts successful vault / remove + any
+	// good_practice graveyards (those represent "the user reviewed this
+	// and confirmed the value is already in the vault elsewhere"). The
+	// scanner already auto-credits unambiguous op:// vault_refs at scan
+	// time; this branch covers the heuristic patterns (jwt,
+	// aws_temp_access_key_id, etc.) only when the user said so.
 	var appliedHashes []string
+	gpHashSet := make(map[string]bool, len(req.Items))
+	for _, item := range req.Items {
+		if item.GoodPractice {
+			gpHashSet[item.MatchSHA256] = true
+		}
+	}
 	for _, res := range results {
 		if !res.OK {
 			continue
 		}
-		if res.Action == "vault" || res.Action == "remove" {
+		switch res.Action {
+		case "vault", "remove":
 			appliedHashes = append(appliedHashes, res.MatchSHA256)
+		case "graveyard", "dismiss":
+			if gpHashSet[res.MatchSHA256] {
+				appliedHashes = append(appliedHashes, res.MatchSHA256)
+			}
 		}
 	}
 	if req.SessionID != "" && len(appliedHashes) > 0 {
@@ -432,11 +464,9 @@ func (srv *Server) handleVaultCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("op", "vault", "create", req.Name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("op vault create %q: %v\n%s", req.Name, err, out)
-		httpError(w, http.StatusInternalServerError, "vault creation failed")
+	if err := srv.activeBackend().CreateEmptyVault(req.Name); err != nil {
+		log.Printf("vault create %q: %v", req.Name, err)
+		httpError(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
@@ -514,7 +544,74 @@ func (srv *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	for i := range s.Findings {
 		s.Findings[i].Value = ""
 	}
-	writeJSON(w, http.StatusOK, s)
+
+	// Enrich the response with cached validation status + Vee
+	// recommendation per finding so the Review table can render the
+	// status chip and the recommendation hint without N round-trips.
+	type enrichedFinding struct {
+		scanner.Finding
+		Validation        *validationCacheView           `json:"validation,omitempty"`
+		VeeRecommendation *validation.VeeRecommendation `json:"vee_recommendation,omitempty"`
+	}
+	cache := map[string]db.ValidationRecord{}
+	if srv.sqliteDB != nil && len(s.Findings) > 0 {
+		hashes := make([]string, 0, len(s.Findings))
+		seen := map[string]bool{}
+		for _, f := range s.Findings {
+			if seen[f.MatchSHA256] {
+				continue
+			}
+			seen[f.MatchSHA256] = true
+			hashes = append(hashes, f.MatchSHA256)
+		}
+		cache, _ = db.GetValidationsForHashes(r.Context(), srv.sqliteDB, hashes)
+	}
+
+	enriched := make([]enrichedFinding, len(s.Findings))
+	for i, f := range s.Findings {
+		ef := enrichedFinding{Finding: f}
+		vstatus := validation.StatusUnknown
+		if rec, ok := cache[f.MatchSHA256]; ok {
+			ef.Validation = &validationCacheView{
+				Status:     rec.Status,
+				Reason:     rec.Reason,
+				CheckedAt:  rec.CheckedAt,
+				HTTPStatus: rec.HTTPStatus,
+			}
+			vstatus = validation.Status(rec.Status)
+		} else if f.ValidatorID == "" {
+			vstatus = validation.StatusUnsupported
+		}
+		rec := validation.Recommend(f, vstatus)
+		ef.VeeRecommendation = &rec
+		enriched[i] = ef
+	}
+	out := struct {
+		ID                    string            `json:"id"`
+		Status                string            `json:"status"`
+		ScannedAt             string            `json:"scanned_at"`
+		FindingsCount         int               `json:"findings_count"`
+		OriginalFindingsCount int               `json:"original_findings_count"`
+		Findings              []enrichedFinding `json:"findings"`
+	}{
+		ID:                    s.ID,
+		Status:                s.Status,
+		ScannedAt:             s.ScannedAt,
+		FindingsCount:         s.FindingsCount,
+		OriginalFindingsCount: s.OriginalFindingsCount,
+		Findings:              enriched,
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// validationCacheView is the per-finding subset surfaced in the
+// session detail response. The full ValidationRecord includes
+// audit-y fields (source, expires_at) the Review UI doesn't need.
+type validationCacheView struct {
+	Status     string `json:"status"`
+	Reason     string `json:"reason"`
+	CheckedAt  string `json:"checked_at"`
+	HTTPStatus int    `json:"http_status,omitempty"`
 }
 
 func (srv *Server) handleDecisionsSave(w http.ResponseWriter, r *http.Request) {
@@ -642,6 +739,7 @@ func (srv *Server) handleExclusionsRemove(w http.ResponseWriter, r *http.Request
 
 func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string) {
 	_ = srv.exclusions.Load()
+	scanCapped := false
 	defer func() {
 		srv.state.mu.Lock()
 		srv.state.Running = false
@@ -650,9 +748,12 @@ func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string
 		st := srv.state.ScanType
 		srv.state.mu.Unlock()
 		srv.hub.Broadcast(map[string]any{
-			"type":      "scan_complete",
-			"sessionId": sessionID,
-			"scan_type": st,
+			"type":        "scan_complete",
+			"sessionId":   sessionID,
+			"scan_type":   st,
+			"scan_capped": scanCapped,
+			"file_cap":    buildinfo.FileCapForAPI(),
+			"edition":     buildinfo.Edition(),
 		})
 	}()
 
@@ -673,6 +774,12 @@ func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string
 		if srv.exclusions.Contains(f.MatchSHA256) {
 			return
 		}
+		// Tag the finding with its heuristic status + validator id
+		// before it leaves this scope. validation.Classify reads f.Value
+		// for fake/placeholder detection, which is only available here
+		// (Save and the WS broadcast both redact the value out).
+		f.HeuristicStatus, f.ValidatorID = validation.Classify(f)
+
 		srv.state.mu.Lock()
 		srv.state.Findings = append(srv.state.Findings, f)
 		srv.state.mu.Unlock()
@@ -687,21 +794,82 @@ func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string
 		})
 	}
 
-	if err := srv.scanner.Scan(ctx, roots, onProgress, onFinding); err != nil && ctx.Err() == nil {
-		log.Printf("scan error: %v", err)
-		srv.logger.Error("scan_error", fmt.Sprintf("session=%s err=%v", sessionID, err))
+	maxFiles := buildinfo.MaxScanFiles()
+	filesScanned, capped, scanErr := srv.scanner.Scan(ctx, roots, maxFiles, onProgress, onFinding)
+	scanCapped = capped
+	if scanErr != nil && ctx.Err() == nil {
+		log.Printf("scan error: %v", scanErr)
+		srv.logger.Error("scan_error", fmt.Sprintf("session=%s err=%v", sessionID, scanErr))
 	}
 
 	srv.state.mu.Lock()
+	srv.state.LastScanCapped = capped
 	findingsCount := len(srv.state.Findings)
 	srv.state.mu.Unlock()
 
-	if err := srv.sessions.Save(sessionID, srv.state.Findings, time.Now()); err != nil {
+	if capped && maxFiles > 0 {
+		srv.addSessionAudit("scan_capped", fmt.Sprintf("files_scanned=%d cap=%d findings=%d", filesScanned, maxFiles, findingsCount), sessionID)
+	}
+
+	// Copy-on-save: the previous code handed srv.state.Findings to
+	// sessions.Save without holding the mutex, which was racy with any
+	// late onFinding callback arriving from a slow worker. Take a
+	// snapshot under the lock, then release before the disk write.
+	srv.state.mu.Lock()
+	savedFindings := make([]scanner.Finding, len(srv.state.Findings))
+	copy(savedFindings, srv.state.Findings)
+	srv.state.mu.Unlock()
+	if err := srv.sessions.Save(sessionID, savedFindings, time.Now()); err != nil {
 		log.Printf("save session: %v", err)
 		srv.logger.Error("session_save_error", fmt.Sprintf("session=%s err=%v", sessionID, err))
 	}
 
-	srv.addSessionAudit("scan_complete", fmt.Sprintf("findings=%d", findingsCount), sessionID)
+	// Auto-credit "good practice" findings as remediated. op:// inject
+	// references (DetectionLayer="vault_ref") are objectively already
+	// in the vault — counting them in the Reports remediation column
+	// matches user intent. Heuristic good-practice patterns (jwt,
+	// aws_temp_access_key_id) require a user decision to be counted; we
+	// only auto-credit the unambiguous vault_ref class here.
+	var autoRemediated []string
+	for _, f := range savedFindings {
+		if f.DetectionLayer == "vault_ref" {
+			autoRemediated = append(autoRemediated, f.MatchSHA256)
+		}
+	}
+	if len(autoRemediated) > 0 {
+		if err := srv.sessions.MergeRemediationApplied(sessionID, autoRemediated); err != nil {
+			log.Printf("auto-credit vault_ref remediations: %v", err)
+		} else {
+			srv.addSessionAudit("remediation.auto_credited", fmt.Sprintf("good_practice_vault_refs=%d", len(autoRemediated)), sessionID)
+		}
+	}
+
+	// Phase 6c: fold this scan into the rolling Posture view. Bounded
+	// to the actual scan roots so a folder-scoped scan can never wrongly
+	// mark untouched directories as "deleted". A nil store (DB
+	// unavailable) silently skips — Posture is a derived projection.
+	if srv.posture != nil {
+		mctx, mcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		rep, err := srv.posture.MergeScan(mctx, sessionID, time.Now(), roots, savedFindings)
+		mcancel()
+		logger := srv.slogger().With(slog.String("subsystem", "posture"), slog.String("session_id", sessionID))
+		if err != nil {
+			logger.Error("posture.merge_failed", slog.String("err", err.Error()))
+		} else {
+			logger.Info("posture.merge_done",
+				slog.Int("upserted", rep.Upserted),
+				slog.Int("marked_deleted", rep.MarkedDeleted),
+				slog.Int("pruned", rep.Pruned),
+				slog.Int("scan_findings", len(savedFindings)),
+				slog.Int("roots", len(roots)),
+			)
+			srv.addSessionAudit("posture.merge",
+				fmt.Sprintf("upserted=%d deleted=%d pruned=%d", rep.Upserted, rep.MarkedDeleted, rep.Pruned),
+				sessionID)
+		}
+	}
+
+	srv.addSessionAudit("scan_complete", fmt.Sprintf("findings=%d capped=%v", findingsCount, capped), sessionID)
 }
 
 // ------------------------------------------------------------------
@@ -713,163 +881,162 @@ func (srv *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
+// handlePosture returns the rolling 30-day fingerprint view (SQLite).
+func (srv *Server) handlePosture(w http.ResponseWriter, r *http.Request) {
+	if srv.posture == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"summary":  map[string]any{"window_days": 30},
+			"findings": []any{},
+			"note":     "Posture store unavailable on this server.",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	now := time.Now()
+
+	summary, err := srv.posture.Summary(ctx, now)
+	if err != nil {
+		srv.slogger().Error("posture.summary_failed", slog.String("err", err.Error()))
+		httpError(w, http.StatusInternalServerError, "posture summary failed")
+		return
+	}
+	findings, err := srv.posture.Recent(ctx, now)
+	if err != nil {
+		srv.slogger().Error("posture.recent_failed", slog.String("err", err.Error()))
+		httpError(w, http.StatusInternalServerError, "posture findings failed")
+		return
+	}
+	if findings == nil {
+		// Force [] instead of null so JS callers can `array.length`
+		// without a type-guard. Matches the rest of the API contract.
+		findings = []db.PostureFinding{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"summary":  summary,
+		"findings": findings,
+	})
+}
+
+// addAuditEntry records a non-session audit event into the persistent
+// audit ledger AND mirrors it as a slog `audit.<action>` info-level
+// record so it streams into the live Logs tab. The Logs tab can then
+// filter by category=audit; the persistent audit.log stays the
+// source-of-truth for governance / export.
 func (srv *Server) addAuditEntry(action, detail string) {
 	srv.logger.Audit(action, detail, "")
+	srv.slogger().Info("audit."+action, slog.String("category", "audit"), slog.String("detail", detail))
 }
 
 func (srv *Server) addSessionAudit(action, detail, sessionID string) {
 	srv.logger.Audit(action, detail, sessionID)
+	srv.slogger().Info("audit."+action, slog.String("category", "audit"), slog.String("detail", detail), slog.String("session_id", sessionID))
 }
 
-// opAuthCheckMu serializes op subprocess calls. Concurrent checks (UI polling + API)
-// can interfere with 1Password desktop integration on Windows and yield flaky auth results.
-var opAuthCheckMu sync.Mutex
-
-const (
-	opWhoamiTimeout    = 8 * time.Second
-	opVaultListTimeout = 15 * time.Second
-	// Caching avoids invoking op on every HTTP poll — repeated subprocesses trigger 1Password prompts.
-	opSessionCachePosTTL = 60 * time.Second
-	// Keep this short: a “not signed in” result must not stick while the user unlocks 1Password / enables CLI integration.
-	opSessionCacheNegTTL = 4 * time.Second
-)
-
-var (
-	opSessionCachedAt   time.Time
-	opSessionCachedVal  bool
-	opSessionCacheMu    sync.Mutex
-)
-
-// opVaultListJSON runs op vault list with a timeout so the HTTP handler cannot hang if op waits on the desktop app.
-func opVaultListJSON(opPath string) ([]byte, error) {
-	opAuthCheckMu.Lock()
-	defer opAuthCheckMu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), opVaultListTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, opPath, "vault", "list", "--format=json")
-	return cmd.Output()
-}
-
-// opDetectSessionOnce checks the 1Password CLI session. Try `op vault list` first — it is the same
-// capability Apply uses and matches “vault is usable” better than whoami alone on some Windows setups.
-func opDetectSessionOnce(opPath string) bool {
-	opAuthCheckMu.Lock()
-	defer opAuthCheckMu.Unlock()
-
-	ctxList, cancelList := context.WithTimeout(context.Background(), opVaultListTimeout)
-	defer cancelList()
-	cmdList := exec.CommandContext(ctxList, opPath, "vault", "list", "--format=json")
-	outList, errList := cmdList.CombinedOutput()
-	if errList == nil {
-		return true
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), opWhoamiTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, opPath, "whoami", "--format=json")
-	out, err := cmd.CombinedOutput()
-	if err == nil && len(bytes.TrimSpace(out)) > 0 {
-		return true
-	}
-	// Failed probes are normal until 1Password is unlocked and CLI integration responds; avoid alarming console noise.
-	if os.Getenv("VAULTIFY_VERBOSE_OP") == "1" {
-		log.Printf("op session check failed: vault list err=%v out=%s; whoami err=%v out=%s", errList, strings.TrimSpace(string(outList)), err, strings.TrimSpace(string(out)))
-	}
-	return false
-}
-
-// isOpSignedIn runs a subprocess only when cache is stale or force is true. Use force for Open Vault / Apply gates.
-func isOpSignedIn(force bool) bool {
-	opPath, err := exec.LookPath("op")
-	if err != nil {
-		return false
-	}
-	opSessionCacheMu.Lock()
-	defer opSessionCacheMu.Unlock()
-	if !force {
-		ttl := opSessionCachePosTTL
-		if !opSessionCachedVal {
-			ttl = opSessionCacheNegTTL
-		}
-		if !opSessionCachedAt.IsZero() && time.Since(opSessionCachedAt) < ttl {
-			return opSessionCachedVal
-		}
-	}
-	opSessionCachedVal = opDetectSessionOnce(opPath)
-	opSessionCachedAt = time.Now()
-	return opSessionCachedVal
-}
-
+// handleVaultAuthStatus returns the controller's current state. When
+// refresh=1 is present we kick off a background probe and return
+// immediately; the WS `vault_auth` event will fire when the probe
+// completes so the client updates without polling. Stub backends
+// continue to use the legacy AuthSignedIn shape.
 func (srv *Server) handleVaultAuthStatus(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true"
-	writeJSON(w, http.StatusOK, map[string]bool{"onepassword_signed_in": isOpSignedIn(force)})
-}
+	b := srv.activeBackend()
 
-// tryOpenOnePasswordDesktop brings 1Password to the foreground so the user can unlock and
-// use CLI integration. Best-effort; ignored if the app or URL handler is missing.
-func tryOpenOnePasswordDesktop() {
-	switch runtime.GOOS {
-	case "windows":
-		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", "onepassword://")
-		if err := cmd.Start(); err != nil {
-			log.Printf("open 1Password (windows): %v", err)
+	if b.CLIName() == "op" {
+		if !b.Installed() {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"vault_cli":             "op",
+				"vault_connected":       false,
+				"onepassword_signed_in": false,
+				"state":                 "cli_missing",
+				"signin_active":         false,
+			})
+			return
 		}
-	case "darwin":
-		if err := exec.Command("open", "-a", "1Password").Start(); err != nil {
-			_ = exec.Command("open", "onepassword://").Start()
+		ctrl := vault.OpController()
+		if force {
+			ctrl.ProbeAsync(true)
+		} else if ctrl.State() == vault.OpStateUnknown {
+			ctrl.ProbeAsync(false)
 		}
-	default:
-		_ = exec.Command("xdg-open", "onepassword://").Start()
-	}
-}
-
-// waitForOpSessionAfterUnlock polls isOpSignedIn: unlocking the desktop app + CLI integration
-// routinely takes 15–45s (master password, Touch ID, app focus).
-func waitForOpSessionAfterUnlock() bool {
-	const maxAttempts = 48
-	const between = 1100 * time.Millisecond
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 {
-			time.Sleep(between)
-		}
-		if isOpSignedIn(true) {
-			return true
-		}
-	}
-	return false
-}
-
-func (srv *Server) handleVaultSignIn(w http.ResponseWriter, r *http.Request) {
-	tryOpenOnePasswordDesktop()
-	// Give the desktop app time to appear before the first op call; avoid racing the user to the password field.
-	time.Sleep(3 * time.Second)
-	signedIn := waitForOpSessionAfterUnlock()
-	if !signedIn {
+		connected := ctrl.SignedIn()
 		writeJSON(w, http.StatusOK, map[string]any{
-			"signed_in": false,
-			"hint":      "Unlock 1Password (password or Touch ID), keep \u201cIntegrate with 1Password CLI\u201d on in Settings \u203a Developer, then click Retry. The first connection can take a full minute.",
+			"vault_cli":             "op",
+			"vault_connected":       connected,
+			"onepassword_signed_in": connected,
+			"state":                 string(ctrl.State()),
+			"signin_active":         ctrl.SigninActive(),
 		})
+		return
+	}
+
+	connected := b.Installed() && b.AuthSignedIn(force)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"vault_cli":             b.CLIName(),
+		"vault_connected":       connected,
+		"onepassword_signed_in": false,
+		"state": func() string {
+			if connected {
+				return "signed_in"
+			}
+			return "signed_out"
+		}(),
+		"signin_active": false,
+	})
+}
+
+// handleVaultSignIn is now non-blocking: it kicks off the controller
+// signin loop in the background and returns 202 immediately. The
+// client listens on the scan WS for `vault_auth` transitions to know
+// when unlock succeeded. Stub backends keep their synchronous shape
+// since they just return a hint message.
+func (srv *Server) handleVaultSignIn(w http.ResponseWriter, r *http.Request) {
+	b := srv.activeBackend()
+	if b.CLIName() == "op" {
+		if !b.Installed() {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"signed_in": false,
+				"accepted":  false,
+				"state":     "cli_missing",
+				"hint":      "Install the 1Password CLI to continue.",
+			})
+			return
+		}
+		ctrl := vault.OpController()
+		ctrl.BeginSignIn()
+		// Deliberately do NOT read ctrl.State() here. State() takes
+		// stateMu under the same lock the goroutine uses to publish
+		// its result; under congested-Desktop conditions that read
+		// can serialise behind queued probes and hang this handler
+		// for tens of seconds. The browser listens on /api/scan/ws
+		// for the real `vault_auth` transition — that's the source
+		// of truth, not whatever state happened to be cached at the
+		// moment the request landed.
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"accepted": true,
+			"state":    "opening",
+		})
+		return
+	}
+
+	ok, hint := b.OpenSignInAndWait()
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false, "hint": hint})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"signed_in": true})
 }
 
 func (srv *Server) handleVaultList1P(w http.ResponseWriter, r *http.Request) {
-	opPath, err := exec.LookPath("op")
-	if err != nil {
+	b := srv.activeBackend()
+	if !b.Installed() {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-	out, err := opVaultListJSON(opPath)
-	if err != nil {
-		writeJSON(w, http.StatusOK, []any{})
-		return
-	}
-	var vaults []struct {
-		Name  string `json:"name"`
-		Items int    `json:"items"`
-	}
-	if json.Unmarshal(out, &vaults) != nil {
+	vaults, err := b.ListVaults()
+	if err != nil || len(vaults) == 0 {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
@@ -912,6 +1079,10 @@ func redactFile(filePath string, lineNum int, rx *regexp.Regexp, wantSHA256 stri
 	return replaceSecretInFile(filePath, lineNum, rx, wantSHA256, "REDACTED_BY_VAULTIFY")
 }
 
+func redactFileByPatternID(filePath string, lineNum int, patternID, wantSHA256 string) (bool, error) {
+	return replaceSecretInFileByPatternID(filePath, lineNum, patternID, wantSHA256, "REDACTED_BY_VAULTIFY")
+}
+
 // replaceSecretInFile replaces the regex match on line lineNum whose SHA256 equals wantSHA256
 // with replacement (e.g. REDACTED_BY_VAULTIFY or an op:// field reference).
 func replaceSecretInFile(filePath string, lineNum int, rx *regexp.Regexp, wantSHA256, replacement string) (bool, error) {
@@ -926,69 +1097,56 @@ func replaceSecretInFile(filePath string, lineNum int, rx *regexp.Regexp, wantSH
 	if lineNum < 1 || lineNum > len(lines) {
 		return false, fmt.Errorf("line %d out of range (file has %d lines)", lineNum, len(lines))
 	}
-	line := lines[lineNum-1]
-	if strings.Contains(line, "REDACTED_BY_VAULTIFY") {
+	lineOrig := lines[lineNum-1]
+	lineNorm := strings.TrimSuffix(lineOrig, "\r")
+	suffix := lineOrig[len(lineNorm):]
+	if strings.Contains(lineNorm, "REDACTED_BY_VAULTIFY") {
 		return false, nil
 	}
-	if strings.Contains(line, replacement) {
+	if strings.Contains(lineNorm, replacement) {
 		return false, nil
 	}
-	locs := rx.FindAllStringIndex(line, -1)
+	locs := rx.FindAllStringIndex(lineNorm, -1)
 	for _, loc := range locs {
-		val := line[loc[0]:loc[1]]
+		val := lineNorm[loc[0]:loc[1]]
 		h := sha256Hex(val)
 		if h == wantSHA256 {
-			lines[lineNum-1] = line[:loc[0]] + replacement + line[loc[1]:]
+			lines[lineNum-1] = lineNorm[:loc[0]] + replacement + lineNorm[loc[1]:] + suffix
 			return true, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
 		}
 	}
 	return false, nil
 }
 
-func ensureVaultExists(name string) {
-	opPath, err := exec.LookPath("op")
-	if err != nil { return }
-	checkCmd := exec.Command(opPath, "vault", "get", name, "--format=json")
-	if out, err := checkCmd.Output(); err == nil && len(out) > 2 {
-		return
+// replaceSecretInFileByPatternID handles context-only findings (pattern_id is a variable name like
+// SHODAN_API_KEY, not a row in patterns.json) by locating the value via scanner.SubmatchSpanForHash.
+func replaceSecretInFileByPatternID(filePath string, lineNum int, patternID, wantSHA256, replacement string) (bool, error) {
+	if patternID == "" {
+		return false, fmt.Errorf("missing pattern_id")
 	}
-	createCmd := exec.Command(opPath, "vault", "create", name)
-	out, err := createCmd.CombinedOutput()
+	data, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Printf("vault create %q: %s", name, strings.TrimSpace(string(out)))
-	} else {
-		log.Printf("vault %q created", name)
+		return false, err
 	}
-}
-
-func createOpItem(vault, title, secret, apiURL string) (string, error) {
-	opPath, err := exec.LookPath("op")
-	if err != nil {
-		return "", fmt.Errorf("op CLI not found")
+	lines := strings.Split(string(data), "\n")
+	if lineNum < 1 || lineNum > len(lines) {
+		return false, fmt.Errorf("line %d out of range (file has %d lines)", lineNum, len(lines))
 	}
-	args := []string{"item", "create",
-		"--vault", vault,
-		"--category", "API Credential",
-		"--title", title,
-		"--format", "json",
-		"credential=" + secret,
+	lineOrig := lines[lineNum-1]
+	lineNorm := strings.TrimSuffix(lineOrig, "\r")
+	suffix := lineOrig[len(lineNorm):]
+	if strings.Contains(lineNorm, "REDACTED_BY_VAULTIFY") {
+		return false, nil
 	}
-	if apiURL != "" {
-		args = append(args, "--url", apiURL)
+	if replacement != "REDACTED_BY_VAULTIFY" && strings.Contains(lineNorm, replacement) {
+		return false, nil
 	}
-	cmd := exec.Command(opPath, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("op item create: %s", strings.TrimSpace(string(out)))
-		return "", fmt.Errorf("failed to create 1Password item")
+	start, end, ok := scanner.SubmatchSpanForHash(lineNorm, patternID, wantSHA256)
+	if !ok {
+		return false, nil
 	}
-	var item struct {
-		ID string `json:"id"`
-	}
-	if json.Unmarshal(out, &item) != nil {
-		return "", fmt.Errorf("could not parse item ID from op output")
-	}
-	return item.ID, nil
+	lines[lineNum-1] = lineNorm[:start] + replacement + lineNorm[end:] + suffix
+	return true, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
 func sha256Hex(s string) string {

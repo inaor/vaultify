@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -26,29 +25,12 @@ func (o *OnePasswordProvider) Detect() (bool, string) {
 }
 
 func (o *OnePasswordProvider) CreateItem(vault, title string, fields map[string]string) (string, error) {
-	args := []string{
-		"item", "create",
-		"--vault", vault,
-		"--category", "API Credential",
-		"--title", title,
-		"--format", "json",
+	cred := fields["credential"]
+	if cred == "" {
+		return "", fmt.Errorf("credential field required")
 	}
-	for k, v := range fields {
-		args = append(args, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	out, err := exec.Command("op", args...).Output()
-	if err != nil {
-		return "", fmt.Errorf("op item create: %w", err)
-	}
-
-	var result struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return "", fmt.Errorf("parsing op output: %w", err)
-	}
-	return result.ID, nil
+	apiURL := fields["url"]
+	return onePasswordBackend{}.CreateCredentialItem(vault, title, cred, apiURL)
 }
 
 func (o *OnePasswordProvider) GetReference(vault, itemID, field string) string {
@@ -56,11 +38,7 @@ func (o *OnePasswordProvider) GetReference(vault, itemID, field string) string {
 }
 
 func (o *OnePasswordProvider) ReadSecret(reference string) (string, error) {
-	out, err := exec.Command("op", "read", reference).Output()
-	if err != nil {
-		return "", fmt.Errorf("op read: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
+	return onePasswordBackend{}.ReadSecret(reference)
 }
 
 func (o *OnePasswordProvider) InstallCommand() string {

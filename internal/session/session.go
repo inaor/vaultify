@@ -35,10 +35,29 @@ type SessionSummary struct {
 	HasDecisions          bool   `json:"has_decisions"`
 }
 
+// Store is the persistence contract for scan sessions. Defining the
+// interface here lets the server depend on a seam rather than the
+// on-disk *Manager, so a SQLite/Badger backend can replace the file
+// implementation later without touching handlers.
+type Store interface {
+	BaseDir() string
+	Dir(id string) string
+	Save(id string, findings []scanner.Finding, ts time.Time) error
+	Get(id string) (*Session, error)
+	List() ([]SessionSummary, error)
+	ListArchived() ([]SessionSummary, error)
+	Archive(id string) error
+	Unarchive(id string) error
+	MergeRemediationApplied(sessionID string, hashes []string) error
+}
+
 // Manager persists sessions to a base directory.
 type Manager struct {
 	baseDir string
 }
+
+// Ensure *Manager satisfies the Store interface.
+var _ Store = (*Manager)(nil)
 
 // NewManager creates a Manager that stores sessions under baseDir.
 func NewManager(baseDir string) *Manager {

@@ -1,6 +1,17 @@
+// Vaultify frontend bootstrap. Phase 4: the top-level App object is
+// still the public singleton (inline onclick="App.foo()" handlers
+// depend on it) but feature controllers now live in ES modules under
+// /assets/<area>/. Each module exports attachXxxController(App) and
+// installs its methods/state onto the singleton. See the init block
+// at the bottom of this file for the full import graph.
+import { attachLogsController } from '/assets/logs/logs.js';
+import { attachPostureController } from '/assets/posture/posture.js';
+
 const App = {
   ws: null,
-  state: { status: 'idle', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: 100000, pattern_totals: [], findings: [] },
+  /** Server-driven: 0 = unlimited scan depth, else max eligible files per scan. */
+  edition: 'open',
+  state: { status: 'idle', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: 10000, pattern_totals: [], findings: [] },
   decisions: {},
   reviewSubTab: 'active',
   reviewSort: { col: 'severity', dir: -1 },
@@ -11,9 +22,13 @@ const App = {
   currentPage: 'dashboard',
   vaultList: [],
   sessionId: null,
+  /** True when the last completed scan hit the free-tier file cap. */
+  lastScanCapped: false,
+  _capBannerDismissed: false,
 
   init() {
     this._loadSelectedVaultProvider();
+    void this.loadEditionInfo();
     this._setupOpSessionSync();
     this.connectWebSocket();
     this.setupNavigation();
@@ -22,68 +37,99 @@ const App = {
     this.loadCatalogue();
     this.loadSessions();
     this.loadVeeProviders();
+    this._setupVeeChatInput();
     this.updateFooters();
   },
 
-  /** Re-check op session when user returns from 1Password / unlock flow (CLI auth is external to this UI). */
-  _vaultAuthPollTimer: null,
-  _opUnlockFastTimer: null,
-  _refreshVaultAuthDebounceTimer: null,
-  /** After first auth-status fetch, so we do not toast on every page load when already connected. */
-  _vaultAuthHydrated: false,
-  /** Serializes auth-status fetches so overlapping responses cannot apply out of order (false "signed out"). */
-  _refreshVaultAuthChain: Promise.resolve(),
-
-  _lastVisibilityAuthBump: 0,
-  _visAuthBumpTimer: null,
-
-  _setupOpSessionSync() {
-    const bump = () => {
-      clearTimeout(this._visAuthBumpTimer);
-      this._visAuthBumpTimer = setTimeout(() => {
-        if (!this.opSignedIn) {
-          this.refreshVaultAuthUI(true);
-          return;
-        }
-        const now = Date.now();
-        if (now - (this._lastVisibilityAuthBump || 0) < 45000) return;
-        this._lastVisibilityAuthBump = now;
-        this.refreshVaultAuthUIDebounced();
-      }, 300);
-    };
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') bump();
-    });
-    window.addEventListener('focus', bump);
-    window.addEventListener('pageshow', (e) => { if (e.persisted) bump(); });
+  /** Fetches /api/version and syncs edition + file_cap + version into UI state.
+   *  Version flows from buildinfo.BuildVersion → /api/version → here, so a
+   *  release bump only touches one Go file; the sidebar pill, footer, and
+   *  Catalogue NEW-tag all update on next load. */
+  async loadEditionInfo() {
+    try {
+      const v = await (await fetch('/api/version')).json();
+      this.edition = (v.edition || 'open').toLowerCase();
+      let cap = v.file_cap;
+      if (typeof cap !== 'number') cap = parseInt(String(cap), 10);
+      if (Number.isNaN(cap) || cap < 0) cap = 10000;
+      this.state.file_cap = cap;
+      if (v.version) {
+        this.currentVersion = v.version;
+        const pill = document.getElementById('brandVersion');
+        if (pill) pill.textContent = 'v' + v.version;
+        this.updateFooters();
+      }
+      this.updateDashboard();
+    } catch (e) {}
   },
 
-  _clearOpUnlockFastPoll() {
-    if (this._opUnlockFastTimer) {
-      clearInterval(this._opUnlockFastTimer);
-      this._opUnlockFastTimer = null;
+  fileCapLabel() {
+    const c = this.state.file_cap;
+    if (c === 0) return 'Unlimited';
+    try {
+      return Number(c).toLocaleString();
+    } catch (_) {
+      return String(c);
     }
   },
 
-  /** After Open Vault, poll auth frequently until unlocked (desktop + CLI handoff can lag). */
-  _startOpUnlockFastPoll() {
-    this._clearOpUnlockFastPoll();
-    let ticks = 0;
-    const maxTicks = 40;
-    this._opUnlockFastTimer = setInterval(() => {
-      ticks++;
-      if (ticks > maxTicks || this.opSignedIn) {
-        this._clearOpUnlockFastPoll();
-        return;
-      }
-      this.refreshVaultAuthUI(true);
-    }, 2500);
+  dismissCapBanner() {
+    this._capBannerDismissed = true;
+    const b = document.getElementById('freeTierCapBanner');
+    if (b) b.style.display = 'none';
   },
 
-  refreshVaultAuthUIDebounced() {
-    clearTimeout(this._refreshVaultAuthDebounceTimer);
-    this._refreshVaultAuthDebounceTimer = setTimeout(() => { this.refreshVaultAuthUI(false); }, 120);
+  dismissReviewCapStrip() {
+    const el = document.getElementById('reviewCapStrip');
+    if (el) {
+      el.style.display = 'none';
+      el.dataset.dismissed = '1';
+    }
   },
+
+  updateScanCapBanner() {
+    const b = document.getElementById('freeTierCapBanner');
+    const n = document.getElementById('freeTierCapBannerN');
+    if (!b) return;
+    if (n) {
+      const cap = this.state.file_cap;
+      n.textContent = cap === 0 ? '\u221e' : Number(cap).toLocaleString();
+    }
+    const show = !!this.lastScanCapped && !this._capBannerDismissed && (this.state.file_cap || 0) > 0;
+    b.style.display = show ? 'flex' : 'none';
+  },
+
+  /** Enter (not Shift+Enter) submits the Vee message like Send; Shift+Enter keeps a newline. */
+  _setupVeeChatInput() {
+    const ta = document.getElementById('veeInput');
+    if (!ta || ta.dataset.veeEnterBound === '1') return;
+    ta.dataset.veeEnterBound = '1';
+    ta.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== 'NumpadEnter') return;
+      if (e.shiftKey) return;
+      if (e.isComposing) return;
+      e.preventDefault();
+      void this.veeSend();
+    });
+  },
+
+  /**
+   * Phase 1: the server now owns the op auth state machine and pushes
+   * `vault_auth` events over the scan WebSocket. The client used to
+   * poll aggressively (3.5s, 22s, and on every focus/pageshow); that
+   * storm caused spontaneous 1Password prompts and the login-twice
+   * pathology. These functions are kept as no-ops so older call sites
+   * that reference them continue to work while we migrate.
+   */
+  _refreshVaultAuthChain: Promise.resolve(),
+  _vaultAuthHydrated: false,
+
+  _setupOpSessionSync() {
+    // WS is the source of truth for auth state; no polling, no focus bumps.
+  },
+  _clearOpUnlockFastPoll() {},
+  _startOpUnlockFastPoll() {},
+  refreshVaultAuthUIDebounced() { this.refreshVaultAuthUI(false); },
 
   /** Ask at most once per browser profile so we do not spam the permission dialog. */
   _requestVaultNotificationsIfNeeded() {
@@ -116,27 +162,9 @@ const App = {
     } catch (e) {}
   },
 
-  _clearVaultAuthPoll() {
-    if (this._vaultAuthPollTimer) {
-      clearInterval(this._vaultAuthPollTimer);
-      this._vaultAuthPollTimer = null;
-    }
-  },
-
-  /** While op is installed but not signed in, poll auth-status so unlock in 1Password updates tiles without a refresh. */
-  _syncVaultAuthPoll() {
-    const op = (this.vaultList || []).find(v => v.cli === 'op');
-    const shouldPoll = !!(op && op.installed && !this.opSignedIn);
-    if (!shouldPoll) {
-      this._clearVaultAuthPoll();
-      return;
-    }
-    if (this._vaultAuthPollTimer) return;
-    this._vaultAuthPollTimer = setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
-      this.refreshVaultAuthUI(true);
-    }, 8000);
-  },
+  // Retained as no-ops; unlock detection is now WS-driven.
+  _clearVaultAuthPoll() {},
+  _syncVaultAuthPoll() {},
 
   connectWebSocket() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -149,6 +177,8 @@ const App = {
   async syncScanState() {
     try {
       const s = await (await fetch('/api/scan/state')).json();
+      if (typeof s.file_cap === 'number') this.state.file_cap = s.file_cap;
+      if (s.edition) this.edition = String(s.edition).toLowerCase();
       if (!s.running && this.state.status === 'running') {
         this.state.status = 'complete';
         this.state.current_path = '';
@@ -187,19 +217,64 @@ const App = {
         this.state.status = 'complete';
         this.state.current_path = '';
         if (msg.scan_type) this.state.scan_type = msg.scan_type;
+        if (typeof msg.file_cap === 'number') this.state.file_cap = msg.file_cap;
+        if (msg.edition) this.edition = String(msg.edition).toLowerCase();
         this.sessionId = msg.sessionId;
+        this.lastScanCapped = !!msg.scan_capped;
+        if (this.lastScanCapped) this._capBannerDismissed = false;
         this.restoreDecisions();
         if (Object.keys(this.decisions).length === 0) this.autoSuggestDecisions();
         this.loadSessions();
-        this.showToast('Scan complete \u2014 ' + (this.state.findings.length) + ' findings across ' + ((this.state.pattern_totals || []).length) + ' patterns', 'success');
+        {
+          const nFind = this.state.findings.length;
+          const nPat = (this.state.pattern_totals || []).length;
+          if (msg.scan_capped) {
+            const lim = Number(msg.file_cap ?? this.state.file_cap ?? 0);
+            const limTxt = lim > 0 ? `${lim.toLocaleString()} eligible files` : 'the configured file limit';
+            this.showToast(`Scan stopped at ${limTxt}. Findings below reflect the scanned portion only (${nFind} hits, ${nPat} pattern types).`, 'warning');
+          } else {
+            this.showToast('Scan complete \u2014 ' + nFind + ' findings across ' + nPat + ' patterns', 'success');
+          }
+        }
         if (!App.tour.active && (this.state.findings || []).length > 0) {
           this.navigate('review');
         }
         break;
+      case 'vault_auth':
+        this._onVaultAuthTransition(msg);
+        break;
     }
     this.updateDashboard();
+    this.updateScanCapBanner();
     this.updateNav();
     this.updateButtons();
+  },
+
+  /** Handles `vault_auth` WS messages pushed by the OpSessionController. */
+  _onVaultAuthTransition(msg) {
+    if (!msg || msg.cli !== 'op') return;
+    const wasSignedIn = !!this.opSignedIn;
+    const nextSignedIn = msg.state === 'signed_in';
+    this.opSignedIn = nextSignedIn;
+    this._vaultAuthLastState = msg.state || '';
+    this._vaultAuthLastReason = msg.reason || '';
+    this._vaultAuthHydrated = true;
+    this.renderVaultStatus();
+
+    if (!wasSignedIn && nextSignedIn) {
+      this._notifyOpSessionConnected();
+      // Vee key presence was previously only refreshed on the *second*
+      // transition because of a cold-start guard. Now we always refresh
+      // on the first signedIn so the Vee panel reflects stored keys
+      // without the user having to "log in twice".
+      try { this.loadVeeProviders(true); } catch (e) {}
+    }
+    if (wasSignedIn && !nextSignedIn && (msg.reason === 'signin_timeout' || msg.reason === 'probe_done')) {
+      this.showToast('1Password disconnected — unlock the desktop app to continue.', 'warning');
+    }
+    if (msg.state === 'signed_out' && msg.reason === 'signin_timeout') {
+      this.showToast('1Password sign-in timed out. Open 1Password and retry.', 'error');
+    }
   },
 
   updatePatternTotals() {
@@ -318,18 +393,73 @@ const App = {
   },
 
   navigate(page) {
+    // Backward-compat: the old separate Audit Log / Logs nav entries
+    // were merged into a single Activity page. Existing bookmarks,
+    // tour steps, and server-side links keep working by being remapped
+    // here; the requested view (live vs audit) is preserved.
+    let requestedAuditView = false;
+    if (page === 'audit') { page = 'activity'; requestedAuditView = true; }
+    else if (page === 'logs') { page = 'activity'; }
+    if (page === 'license') { page = 'dashboard'; }
+
+    const prevPage = this.currentPage;
     this.currentPage = page || 'dashboard';
     window.location.hash = this.currentPage;
     document.querySelectorAll('.sidebar nav a[data-page]').forEach(a => { a.classList.toggle('active', a.dataset.page === this.currentPage); });
     document.querySelectorAll('.page').forEach(p => { p.classList.toggle('active', p.id === `page-${this.currentPage}`); });
+
+    // Tear down anything page-specific the user is leaving. The
+    // pattern-graph force simulation is a 60 fps requestAnimationFrame
+    // loop; leaving it running off-screen is a real CPU + memory drag
+    // on long-lived dashboard sessions, so we explicitly cancel it.
+    if (prevPage === 'dashboard' && this.currentPage !== 'dashboard') {
+      if (this._graphAnim) { cancelAnimationFrame(this._graphAnim); this._graphAnim = null; }
+    }
+
     if (this.currentPage === 'reports') this.loadSessions();
     if (this.currentPage === 'review') this.renderReview();
-    if (this.currentPage === 'dashboard') this.refreshVaultAuthUI(false);
-    if (this.currentPage === 'audit') this.loadAuditLog();
+    if (this.currentPage === 'dashboard') {
+      this.refreshVaultAuthUI(false);
+      this.updateScanCapBanner();
+      // Restart the inline graph animation only when there's actually
+      // data to render, so empty-state pages stay quiet.
+      if (this.state && this.state.pattern_totals && this.state.pattern_totals.length) {
+        const c = document.getElementById('patternGraph');
+        if (c && !this._graphAnim) {
+          this._startForceGraph(c, this.state.pattern_totals, false, { maxPatternTypes: this.GRAPH_MAX_INLINE });
+        }
+      }
+    }
+    if (this.currentPage === 'activity') {
+      this.setActivityView(requestedAuditView ? 'audit' : (this._activityView || 'live'));
+      this.loadLogs();
+    }
     if (this.currentPage === 'catalogue') this.loadCatalogue();
     if (this.currentPage === 'docs') this.loadDocs();
     if (this.currentPage === 'version') this.loadVersion();
   },
+
+  // Activity page view toggle. 'live' shows the WS-streamed slog
+  // panel; 'audit' shows the persistent ledger. The page itself is
+  // always #page-activity so navigation state stays simple.
+  _activityView: 'live',
+  setActivityView(view) {
+    if (view !== 'live' && view !== 'audit') view = 'live';
+    this._activityView = view;
+    const live = document.getElementById('activityLiveView');
+    const audit = document.getElementById('activityAuditView');
+    if (live) live.style.display = view === 'live' ? '' : 'none';
+    if (audit) audit.style.display = view === 'audit' ? '' : 'none';
+    document.querySelectorAll('.activity-view-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.view === view);
+    });
+    if (view === 'audit') this.loadAuditLog();
+  },
+
+  // Logs tab controller lives in /assets/logs/logs.js and is attached
+  // to App at module load (see the ES-module bootstrap at the bottom
+  // of this file). No state or methods here; we keep the section as a
+  // marker so future extractions can follow the same pattern.
 
   updateNav() {
     const badge = document.getElementById('navFindingsBadge');
@@ -482,8 +612,14 @@ const App = {
 
   async startScan(roots) {
     this.hideFolderPicker();
+    this.lastScanCapped = false;
+    this._capBannerDismissed = false;
+    const capB = document.getElementById('freeTierCapBanner');
+    if (capB) capB.style.display = 'none';
+    const revStrip = document.getElementById('reviewCapStrip');
+    if (revStrip) delete revStrip.dataset.dismissed;
     const scanType = roots && roots.length ? 'specific_folder' : 'entire_machine';
-    this.state = { status: 'running', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: 100000, pattern_totals: [], findings: [], scan_type: scanType, current_path: '' };
+    this.state = { status: 'running', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: this.state.file_cap, pattern_totals: [], findings: [], scan_type: scanType, current_path: '' };
     this.decisions = {};
     this._patternEls = {};
     const patEl = document.getElementById('patterns');
@@ -630,7 +766,9 @@ const App = {
     const pr = el('progRing'); if (pr) { pr.style.strokeDashoffset = this.dashOffset(pct); pr.style.stroke = sc; }
     if (el('progVal')) { el('progVal').textContent = pct + '%'; el('progVal').style.color = sc; }
     if (el('gFiles')) el('gFiles').textContent = files + ' / ' + denom;
-    if (el('gCap')) el('gCap').textContent = s.file_cap || 100000;
+    if (el('gCap')) el('gCap').textContent = this.fileCapLabel();
+    const capPro = el('btnCapPro');
+    if (capPro) capPro.style.display = (this.edition === 'pro' || this.state.file_cap === 0) ? 'none' : '';
 
     const pathRow = el('currentPathRow');
     const pathEl = el('currentPath');
@@ -1155,18 +1293,51 @@ const App = {
   _loadSelectedVaultProvider() {
     try {
       const s = localStorage.getItem('vf-vault-provider');
-      if (s && /^(op|aws|vault|doppler)$/.test(s)) this.selectedVaultProvider = s;
-      else this.selectedVaultProvider = 'op';
+      if (s && /^(op|aws|vault|doppler)$/.test(s)) {
+        if (s === 'vault' || s === 'doppler') {
+          this.selectedVaultProvider = 'op';
+          try { localStorage.setItem('vf-vault-provider', 'op'); } catch (e) {}
+        } else {
+          this.selectedVaultProvider = s;
+        }
+      } else this.selectedVaultProvider = 'op';
     } catch (e) {
       this.selectedVaultProvider = 'op';
     }
   },
 
-  selectVaultProvider(cli) {
+  async selectVaultProvider(cli) {
     if (!/^(op|aws|vault|doppler)$/.test(cli)) return;
+    if (cli === 'vault' || cli === 'doppler') {
+      this.showToast('HashiCorp Vault and Doppler are not wired up in this build yet.', 'info');
+      return;
+    }
+    const prev = this.selectedVaultProvider;
     this.selectedVaultProvider = cli;
     try { localStorage.setItem('vf-vault-provider', cli); } catch (e) {}
+    try {
+      await fetch('/api/vaults/selected', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cli }) });
+    } catch (e) {}
+    // Only reset opSignedIn when the selection actually involves leaving op;
+    // flipping between two stub providers must not wipe the 1Password state.
+    if (prev === 'op' && cli !== 'op') this.opSignedIn = false;
+    if (cli === 'op' && prev !== 'op') this.refreshVaultAuthUI(false);
     this.renderVaultStatus();
+  },
+
+  async syncVaultSelectionFromServer() {
+    try {
+      const r = await (await fetch('/api/vaults/selected')).json();
+      if (r.cli && /^(op|aws|vault|doppler)$/.test(r.cli)) {
+        if (r.cli === 'vault' || r.cli === 'doppler') {
+          this.selectedVaultProvider = 'op';
+          try { localStorage.setItem('vf-vault-provider', 'op'); } catch (e) {}
+        } else {
+          this.selectedVaultProvider = r.cli;
+          try { localStorage.setItem('vf-vault-provider', r.cli); } catch (e) {}
+        }
+      }
+    } catch (e) {}
   },
 
   renderVaultSkeleton() {
@@ -1188,6 +1359,7 @@ const App = {
       const resp = await fetch('/api/vaults');
       this.vaultList = await resp.json();
     } catch (err) {}
+    await this.syncVaultSelectionFromServer();
     await this.refreshVaultAuthUI(forceAuthCheck === true);
   },
 
@@ -1202,22 +1374,20 @@ const App = {
 
   async _refreshVaultAuthUIRun(forceRefresh) {
     const wasSignedIn = this.opSignedIn;
-    const hadPriorAuthCheck = this._vaultAuthHydrated;
     try {
       const q = forceRefresh ? '?refresh=1' : '';
       const r = await (await fetch('/api/vaults/auth-status' + q)).json();
-      this.opSignedIn = !!r.onepassword_signed_in;
+      this.opSignedIn = (r.vault_connected !== undefined) ? !!r.vault_connected : !!r.onepassword_signed_in;
+      this._vaultAuthLastState = r.state || (this.opSignedIn ? 'signed_in' : 'signed_out');
     } catch (e) {}
     this._vaultAuthHydrated = true;
-    if (hadPriorAuthCheck && !wasSignedIn && this.opSignedIn) {
-      this._notifyOpSessionConnected();
-    }
     if (!wasSignedIn && this.opSignedIn) {
-      this._clearOpUnlockFastPoll();
+      this._notifyOpSessionConnected();
       try {
-        // First app load: shallow provider list only (no op key reads) — avoids 1Password / CLI prompts.
-        // After at least one auth poll, deep-check keys when the user becomes signed in (e.g. after unlock).
-        await this.loadVeeProviders(hadPriorAuthCheck);
+        // On every first-transition to signedIn we deep-check Vee keys.
+        // The old cold-start guard caused the "login twice" bug where
+        // Vee didn't see stored keys until the user re-authenticated.
+        await this.loadVeeProviders(true);
       } catch (e) {}
     }
     this.renderVaultStatus();
@@ -1228,17 +1398,31 @@ const App = {
     if (!section) return;
     const op = (this.vaultList || []).find(v => v.cli === 'op');
     const opInstalled = !!(op && op.installed);
-    const needAttention = !opInstalled || !this.opSignedIn;
+    let needAttention;
+    if (this.selectedVaultProvider === 'op') {
+      needAttention = !opInstalled || !this.opSignedIn;
+    } else {
+      needAttention = true;
+    }
     section.classList.toggle('sidebar-vault-block--needs-attention', needAttention);
   },
 
   /** Returns true when 1Password CLI is on PATH and authenticated (same bar as Apply / Vee vault ops). */
   async ensureOpSessionForVaultFeatures() {
+    if (this.selectedVaultProvider !== 'op') {
+      this.showToast('Apply and Vee vault features use 1Password today. Select the 1Password tile in Choose a Vault to make it the active vault.', 'error');
+      return false;
+    }
     const haveProviders = Array.isArray(this.vaultList) && this.vaultList.length > 0;
     const opRow = (this.vaultList || []).find(v => v.cli === 'op');
-    // Avoid re-running the full vault grid skeleton on every Vee send / summary — only refresh auth.
+    // One probe is enough. The controller coalesces concurrent callers;
+    // if the state is already cached and fresh, this is a no-op subprocess
+    // call on the server. Removing the second forced probe is what kills
+    // the "login twice" UX.
     if (haveProviders && opRow && opRow.installed) {
-      await this.refreshVaultAuthUI(true);
+      if (!this.opSignedIn) {
+        await this.refreshVaultAuthUI(true);
+      }
     } else {
       await this.loadVaults(true);
     }
@@ -1280,6 +1464,10 @@ const App = {
   onSidebarVaultTileClick(e) {
     if (e.target.closest('button, a')) return;
     const cli = e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.cli;
+    if (e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.unsupported === '1') {
+      this.showToast('HashiCorp Vault and Doppler are not wired up in this build yet.', 'info');
+      return;
+    }
     if (cli) this.selectVaultProvider(cli);
   },
 
@@ -1310,10 +1498,20 @@ const App = {
 
   _renderSidebarVaultTile(v) {
     const active = this.selectedVaultProvider === v.cli ? ' sidebar-vault-tile--active' : '';
+    const inactive = this.selectedVaultProvider !== v.cli ? ' sidebar-vault-tile--inactive' : '';
+    const unsupported = v.cli === 'vault' || v.cli === 'doppler';
+    const dis = unsupported ? ' sidebar-vault-tile--disabled' : '';
     let statusHtml = '';
     let actionsHtml = '';
+    const isSel = this.selectedVaultProvider === v.cli;
 
-    if (v.cli === 'op') {
+    if (unsupported) {
+      statusHtml = '<span style="color:var(--muted)">Coming later</span>';
+      actionsHtml = '<span style="font-size:.55rem;color:var(--muted)">Not wired up in this build</span>';
+    } else if (!isSel) {
+      statusHtml = '<span style="color:var(--muted)">Not active</span>';
+      actionsHtml = '<span style="font-size:.55rem;color:var(--muted)">Click to select</span>';
+    } else if (v.cli === 'op') {
       if (!v.installed) {
         statusHtml = '<span style="color:var(--err)">CLI missing</span>';
         actionsHtml = `${this.vaultOfficialInstallLink(v)}
@@ -1327,14 +1525,14 @@ const App = {
             <span id="signInMsg" style="font-size:.55rem;color:var(--muted);display:block;margin-top:4px">Unlock 1Password</span>`;
       }
     } else if (v.installed) {
-      statusHtml = '<span style="color:var(--ok)">On PATH</span>';
+      statusHtml = '<span style="color:var(--ok)">On PATH</span><div style="font-size:.55rem;color:var(--muted);margin-top:4px">Vault apply: use 1Password for now</div>';
     } else {
       statusHtml = '<span style="color:var(--muted)">Not installed</span>';
       actionsHtml = `${this.vaultOfficialInstallLink(v)}<div style="font-size:.55rem;color:var(--muted);margin-top:2px"><code style="color:var(--accent)">${this.esc(v.cli)}</code></div>`;
     }
 
     const actionsBlock = actionsHtml ? `<div class="sidebar-vault-tile-actions">${actionsHtml}</div>` : '';
-    return `<div class="sidebar-vault-tile${active}" data-cli="${this.esc(v.cli)}" onclick="App.onSidebarVaultTileClick(event)" role="button" tabindex="0">
+    return `<div class="sidebar-vault-tile${active}${inactive}${dis}" data-cli="${this.esc(v.cli)}" data-unsupported="${unsupported ? '1' : '0'}" onclick="App.onSidebarVaultTileClick(event)" role="button" tabindex="0">
         ${this.sidebarVaultTileLogo(v)}
         <div class="sidebar-vault-tile-name">${this.esc(v.name)}</div>
         <div class="sidebar-vault-tile-cli">${this.esc(v.cli)}</div>
@@ -1362,25 +1560,37 @@ const App = {
     }
   },
 
+  /**
+   * Phase 1: signin is now non-blocking. POST /api/vaults/signin returns
+   * 202 immediately and the server drives the unlock polling loop. The
+   * UI shows "Opening…" and waits for a `vault_auth` WS event to flip
+   * the state — no client-side polling, no fast timers.
+   */
   async openVault() {
     this._requestVaultNotificationsIfNeeded();
     const msg = document.getElementById('signInMsg');
-    if (msg) msg.innerHTML = '<span style="color:var(--muted)">Opening 1Password and connecting the CLI\u2026 (unlock if prompted; can take up to ~1 minute)</span>';
+    if (msg) msg.innerHTML = '<span style="color:var(--muted)">Opening 1Password and connecting the CLI\u2026 (unlock if prompted; this can take up to ~1 minute)</span>';
     try {
-      const r = await (await fetch('/api/vaults/signin', { method: 'POST' })).json();
-      this.opSignedIn = r.signed_in;
-      this.renderVaultStatus();
-      if (r.signed_in) {
-        this._clearOpUnlockFastPoll();
+      const resp = await fetch('/api/vaults/signin', { method: 'POST' });
+      // 202 Accepted or 200 OK both fine; we only care about the initial state.
+      let initial = {};
+      try { initial = await resp.json(); } catch (_) {}
+      if (initial && initial.signed_in === true) {
+        // Legacy stub backend path.
+        this.opSignedIn = true;
+        this.renderVaultStatus();
         this._notifyOpSessionConnected();
         this.loadVeeProviders(true);
-      } else {
-        this._startOpUnlockFastPoll();
-        const m = document.getElementById('signInMsg');
-        if (m) m.innerHTML = `<span style="color:var(--warn)">${this.esc(r.hint || 'Unlock 1Password first.')}</span> <button class="tb-btn" onclick="App.openVault()" style="font-size:.68rem;padding:2px 8px;margin-left:4px">Retry</button>`;
+        return;
+      }
+      if (initial && initial.hint) {
+        if (msg) msg.innerHTML = `<span style="color:var(--warn)">${this.esc(initial.hint)}</span>`;
+        return;
+      }
+      if (msg) {
+        msg.innerHTML = '<span style="color:var(--accent)">Unlock 1Password if it prompted you. Vaultify will update the moment the CLI connects.</span>';
       }
     } catch (e) {
-      this._startOpUnlockFastPoll();
       const detail = (e && (e.message || String(e))) ? this.esc(String(e.message || e)) : '';
       const hint = detail ? ` ${detail}` : '';
       if (msg) msg.innerHTML = `<span style="color:var(--warn)">Connection failed.${hint}</span> <span style="color:var(--muted);font-size:.55rem">Is Vaultify running? Start <code>vaultify.exe</code> or open it from the repo, then Retry.</span> <button class="tb-btn" onclick="App.openVault()" style="font-size:.68rem;padding:2px 8px;margin-left:4px">Retry</button>`;
@@ -1477,7 +1687,6 @@ const App = {
         } else {
           if (fc > 0) html += `<button class="tb-btn" onclick="App.loadSessionFindings('${this.esc(s.id)}')" style="font-size:.78rem;padding:5px 12px">Review</button>`;
           html += `<button class="tb-btn" onclick="App.archiveSession('${this.esc(s.id)}')" style="font-size:.72rem;padding:4px 10px" title="Archive">Archive</button>`;
-          html += `<button class="tb-btn" onclick="event.stopPropagation();App.showProModal()" style="font-size:.68rem;padding:3px 8px;opacity:.6" title="Share Report">Share \u{1F451}</button>`;
         }
         html += `</div>`;
         html += `</td></tr>`;
@@ -1712,6 +1921,11 @@ const App = {
     const allGroups = this.getGroups();
     const bulkEl = document.getElementById('bulkActions');
     if (bulkEl) bulkEl.style.display = allGroups.length > 0 ? 'flex' : 'none';
+    const capStrip = document.getElementById('reviewCapStrip');
+    if (capStrip) {
+      const showStrip = this.lastScanCapped && (this.state.file_cap || 0) > 0 && capStrip.dataset.dismissed !== '1';
+      capStrip.style.display = showStrip ? 'flex' : 'none';
+    }
 
     const isRowActiveTab = (g) => {
       const d = this.decisions[g.hash];
@@ -1763,6 +1977,9 @@ const App = {
 <button type="button" class="tb-btn" onclick="App.reviewSubTab='active';App.reviewPage=0;App.renderReview()" style="${this.reviewSubTab === 'active' ? 'border-color:var(--accent);color:var(--accent)' : ''}">Active <span class="badge">${activeCount}</span></button>
 <button type="button" class="tb-btn" onclick="App.reviewSubTab='junkyard';App.reviewPage=0;App.renderReview()" style="${this.reviewSubTab === 'junkyard' ? 'border-color:var(--accent);color:var(--accent)' : ''}">\u{1F5D1}\u{FE0F} Junkyard <span class="badge">${jyCount}</span></button>
 <span style="font-size:.72rem;color:var(--c-slate);margin-left:8px">Junkyard entries are excluded on the next scan (match hash).</span>
+<span style="flex:1"></span>
+<button type="button" class="tb-btn" onclick="App.runBulkValidation()" title="Run live validation on every row that has a validator">Run Validation</button>
+<button type="button" class="tb-btn" onclick="App.runPlaybook()" title="Validate, then stage Vee recommendations as decisions for one-click Apply">Apply &amp; Secure Everything</button>
 </div>`;
 
     if (!sorted.length) {
@@ -1784,7 +2001,9 @@ const App = {
 
     const thS = 'text-align:left;padding:10px 8px;color:var(--c-slate);font-size:.72rem;text-transform:uppercase;border-bottom:1px solid var(--border);cursor:pointer;user-select:none';
     const thC = `${thS};text-align:center`;
-    let html = tabBar + `<div class="vf-review-table-wrap" style="overflow-x:auto;width:100%;margin-bottom:4px;-webkit-overflow-scrolling:touch"><table class="vf-sortable" style="width:100%;min-width:1020px;border-collapse:collapse;font-size:.88rem"><thead><tr><th style="width:30px;padding:10px 8px;border-bottom:1px solid var(--border)"></th><th style="${thS}" onclick="App.toggleReviewSort('pattern')">Pattern${this._reviewThMark('pattern')}</th><th style="${thS}" onclick="App.toggleReviewSort('preview')">Preview${this._reviewThMark('preview')}</th><th style="${thS};min-width:140px" onclick="App.toggleReviewSort('folder')">Folder${this._reviewThMark('folder')}</th><th style="${thS};min-width:120px" onclick="App.toggleReviewSort('file')">File${this._reviewThMark('file')}</th><th style="${thC}" onclick="App.toggleReviewSort('severity')">Severity${this._reviewThMark('severity')}</th><th style="${thC}" onclick="App.toggleReviewSort('entropy')">Entropy${this._reviewThMark('entropy')}</th><th style="${thC}" onclick="App.toggleReviewSort('files')">Files${this._reviewThMark('files')}</th><th style="${thC}" onclick="App.toggleReviewSort('decision')">Decision${this._reviewThMark('decision')}</th><th style="width:120px;padding:10px 8px;border-bottom:1px solid var(--border)"></th></tr></thead><tbody>`;
+    const thW = (pct) => `${thS};width:${pct}%;max-width:0`;
+    const thWC = (pct) => `${thC};width:${pct}%;max-width:0`;
+    let html = tabBar + `<div class="vf-review-table-wrap"><table class="vf-sortable vf-review-grid"><thead><tr><th style="width:32px;min-width:32px;padding:10px 4px;border-bottom:1px solid var(--border)"></th><th class="vf-td-clip" style="${thW(18)}" onclick="App.toggleReviewSort('pattern')">Pattern${this._reviewThMark('pattern')}</th><th class="vf-td-clip" style="${thW(15)}" onclick="App.toggleReviewSort('preview')">Preview${this._reviewThMark('preview')}</th><th class="vf-td-clip" style="${thW(14)}" onclick="App.toggleReviewSort('folder')">Folder${this._reviewThMark('folder')}</th><th class="vf-td-clip" style="${thW(13)}" onclick="App.toggleReviewSort('file')">File${this._reviewThMark('file')}</th><th class="vf-td-clip" style="${thWC(7)}" onclick="App.toggleReviewSort('severity')">Severity${this._reviewThMark('severity')}</th><th class="vf-td-clip" style="${thWC(9)}">Status</th><th class="vf-td-clip" style="${thWC(6)}" onclick="App.toggleReviewSort('entropy')">Entropy${this._reviewThMark('entropy')}</th><th class="vf-td-clip" style="${thWC(5)}" onclick="App.toggleReviewSort('files')">Files${this._reviewThMark('files')}</th><th class="vf-td-clip" style="${thWC(13)}" onclick="App.toggleReviewSort('decision')">Decision${this._reviewThMark('decision')}</th><th style="width:104px;min-width:84px;padding:10px 4px;border-bottom:1px solid var(--border)"></th></tr></thead><tbody>`;
 
     pageItems.forEach(g => {
       const dec = this.decisions[g.hash];
@@ -1812,31 +2031,33 @@ const App = {
       const folderStr = this._groupFolder(g);
       const fileStr = this._groupFileLabel(g);
       const pathTitle = this.esc(this._primaryPath(g));
-      html += `<td style="padding:8px"><span style="width:9px;height:9px;border-radius:50%;background:${sc};display:inline-block"></span></td>`;
-      html += `<td style="padding:8px;font-family:monospace;font-size:12px;color:var(--accent)">${this.esc(g.pattern_id)}${isCtx ? '<span style="margin-left:6px;font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(167,139,250,.15);color:var(--c-violet);font-weight:700;vertical-align:middle">CTX</span>' : ''}${isBoth ? '<span style="margin-left:6px;font-size:9px;color:var(--c-success);vertical-align:middle">\u2713</span>' : ''}</td>`;
-      html += `<td style="padding:8px;font-family:monospace;font-size:12px;color:var(--c-rose);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this.esc(g.redacted_preview)}</td>`;
-      html += `<td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${pathTitle}">${folderStr ? this.esc(folderStr) : '\u2014'}</td>`;
-      html += `<td style="padding:8px;font-family:monospace;font-size:11px;color:var(--text);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${pathTitle}">${fileStr === '\u2014' ? '\u2014' : this.esc(fileStr)}</td>`;
+      const patTitle = this.esc(g.pattern_id || '');
+      html += `<td style="padding:8px 4px"><span style="width:9px;height:9px;border-radius:50%;background:${sc};display:inline-block"></span></td>`;
+      html += `<td class="vf-td-clip" style="padding:8px 6px;font-family:monospace;font-size:12px;color:var(--accent)" title="${patTitle}">${this.esc(g.pattern_id)}${isCtx ? '<span style="margin-left:4px;font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(167,139,250,.15);color:var(--c-violet);font-weight:700;vertical-align:middle">CTX</span>' : ''}${isBoth ? '<span style="margin-left:4px;font-size:9px;color:var(--c-success);vertical-align:middle">\u2713</span>' : ''}</td>`;
+      html += `<td class="vf-td-clip" style="padding:8px 6px;font-family:monospace;font-size:12px;color:var(--c-rose)" title="${this.esc(g.redacted_preview || '')}">${this.esc(g.redacted_preview)}</td>`;
+      html += `<td class="vf-td-clip" style="padding:8px 6px;font-family:monospace;font-size:11px;color:var(--muted)" title="${pathTitle}">${folderStr ? this.esc(folderStr) : '\u2014'}</td>`;
+      html += `<td class="vf-td-clip" style="padding:8px 6px;font-family:monospace;font-size:11px;color:var(--text)" title="${pathTitle}">${fileStr === '\u2014' ? '\u2014' : this.esc(fileStr)}</td>`;
       html += `<td style="padding:8px;text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;background:${sevCol}22;color:${sevCol}">${this.esc(g.severity || '')}</span></td>`;
+      html += `<td style="padding:8px 4px;text-align:center" id="vf-status-cell-${g.hash}">${this._statusCell(g)}</td>`;
       html += `<td style="padding:8px;text-align:center;font-family:monospace;font-size:12px;font-weight:700;color:var(--c-cyan);opacity:${entOpacity}">${avgEnt > 0 ? avgEnt.toFixed(1) : '\u2014'}</td>`;
       html += `<td style="padding:8px;text-align:center"><span style="background:var(--border);padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600">${g.locs.length}</span></td>`;
-      html += `<td style="padding:8px;text-align:center"><span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;${pillColors[st]}">${pillLabels[st]}</span></td>`;
-      html += `<td style="padding:8px"><div style="display:flex;gap:4px" onclick="event.stopPropagation()">`;
+      html += `<td class="vf-td-clip" style="padding:8px 4px;text-align:center"><div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span class="vf-decision-pill" style="padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;${pillColors[st]}" title="${this.esc(pillLabels[st])}">${pillLabels[st]}</span>${this._veeRecChip(g, st)}</div></td>`;
+      html += `<td class="vf-td-actions" style="padding:8px 4px"><div style="display:flex;gap:3px;justify-content:flex-end" onclick="event.stopPropagation()">`;
       html += `<button onclick="App.setDecision('${g.hash}','vault')" ${btnStyle('vault')}>${lockSvg}</button>`;
       html += `<button onclick="App.setDecision('${g.hash}','remove')" ${btnStyle('remove')}>${trashSvg}</button>`;
       html += `<button onclick="App.setDecision('${g.hash}','graveyard')" ${btnStyle('graveyard')}>${junkGlyph}</button>`;
       html += `</div></td></tr>`;
 
-      html += '<tr style="display:none;background:var(--bg2)"><td colspan="10" style="padding:10px 16px 14px 32px">';
+      html += '<tr style="display:none;background:var(--bg2)"><td colspan="11" style="padding:10px 16px 14px 32px">';
       if (isGP) {
         const gpMsg = App.goodPracticePatterns[g.pattern_id] || 'This credential follows security best practices.';
         html += `<div style="background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.2);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:.82rem;display:flex;align-items:center;gap:10px"><span style="font-size:1.2rem">\u{1F44D}</span><span style="color:var(--ok)">${App.esc(gpMsg)}</span></div>`;
       }
       g.locs.forEach((f, fi) => {
         const hasSnippet = f.line_snippet && f.line_snippet.trim();
-        html += `<div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">`;
+        html += `<div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;min-width:0">`;
         html += `<span style="color:var(--text);font-weight:600;flex-shrink:0">L${f.line_number}</span>`;
-        html += `<span style="color:var(--muted);font-family:monospace;word-break:break-all;flex:1">${this.esc(f.relative_path || f.full_path)}</span>`;
+        html += `<span style="color:var(--muted);font-family:monospace;flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word">${this.esc(f.relative_path || f.full_path)}</span>`;
         if (hasSnippet) html += `<span onclick="event.stopPropagation();var s=document.getElementById('snip-${g.hash}-${fi}');s.style.display=s.style.display==='none'?'block':'none'" style="font-size:10px;color:var(--accent);cursor:pointer;padding:2px 8px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);border-radius:4px;flex-shrink:0">snippet</span>`;
         html += `</div>`;
         if (hasSnippet) {
@@ -1865,6 +2086,237 @@ const App = {
       html += `</div>`;
     }
     el.innerHTML = html;
+  },
+
+  // _statusCell renders the Status column for one Review row: the
+  // current chip (heuristic or live) plus a [Check] button when the
+  // pattern has a registered validator. The cell is wrapped in
+  // #vf-status-cell-<hash> so the validate flow can swap it in place.
+  _statusCell(g) {
+    const f = (g && g.locs && g.locs[0]) || {};
+    const live = (g._live_validation && g._live_validation.status) || '';
+    const status = live || f.heuristic_status || '';
+    const validatorID = f.validator_id || '';
+
+    const chip = this._statusChip(status, live ? 'live' : 'heuristic', live ? g._live_validation.reason : '');
+    const canCheck = validatorID && status !== 'active' && status !== 'invalid';
+    const btn = (validatorID && validatorID !== 'aws')
+      ? `<button class="vf-check-btn" onclick="event.stopPropagation();App.runValidation('${this.esc(g.hash)}','${this.esc(validatorID)}')" title="Run live validation against ${this.esc(validatorID)}">${canCheck ? 'Check' : 'Re-check'}</button>`
+      : '';
+    return `<div class="vf-status-cell">${chip}${btn}</div>`;
+  },
+
+  // _statusChip renders just the colored pill — used by both _statusCell
+  // and the Posture page so the palette stays aligned.
+  _statusChip(status, kind, reason) {
+    if (!status) {
+      return `<span class="vf-status-chip vf-status-chip--unset" title="Not yet classified">\u2014</span>`;
+    }
+    const meta = ({
+      heuristic_fake:    { label: 'Likely Fake',   cls: 'fake',    title: 'Heuristic detected placeholder / demo / repeated chars.' },
+      heuristic_valid:   { label: 'Looks Real',    cls: 'valid',   title: 'Heuristics suggest a real key. Click Check to confirm against the provider.' },
+      not_validatable:   { label: 'No Live Check', cls: 'na',      title: 'No third-party endpoint to test against (good practice ref, JWT, or unsupported provider).' },
+      active:            { label: 'ACTIVE',        cls: 'active',  title: 'Provider confirmed: this key is live. Vault and rotate.' },
+      invalid:           { label: 'Invalid',       cls: 'invalid', title: 'Provider rejected the key (revoked / unknown). Safe to remove.' },
+      rate_limited:      { label: 'Rate-limited',  cls: 'error',   title: 'Provider rate-limited the check. Try again in a moment.' },
+      error:             { label: 'Error',         cls: 'error',   title: 'Validation could not complete (network or provider 5xx).' },
+      unsupported:       { label: 'No Live Check', cls: 'na',      title: 'No validator wired up for this pattern.' },
+    })[status] || { label: status, cls: 'unset', title: status };
+    const t = reason ? meta.title + ' \u00b7 ' + reason : meta.title;
+    return `<span class="vf-status-chip vf-status-chip--${meta.cls}" title="${this.esc(t)}">${meta.label}</span>`;
+  },
+
+  // _veeRecChip renders the Vee recommendation hint under the Decision
+  // pill. Only shown when (a) Vee suggests a different action than the
+  // user already chose, and (b) it's not the trivial keep/op-ref case.
+  _veeRecChip(g, currentDecision) {
+    const f = (g && g.locs && g.locs[0]) || {};
+    const rec = f.vee_recommendation;
+    if (!rec || !rec.recommended) return '';
+    if (rec.recommended === 'keep') return '';
+    // Suppress hint when current decision already matches Vee.
+    const cur = currentDecision === 'good_practice' ? 'keep' : currentDecision;
+    if (cur === rec.recommended) return '';
+    const labels = { vault: 'Vault', remove: 'Remove', graveyard: 'Junkyard', rotate: 'Rotate' };
+    const lab = labels[rec.recommended] || rec.recommended;
+    const tip = `${rec.reason || ''}${rec.confidence ? ' (Vee ' + Math.round(rec.confidence * 100) + '%)' : ''}`;
+    return `<button class="vf-vee-rec" onclick="event.stopPropagation();App.adoptVeeRecommendation('${this.esc(g.hash)}','${this.esc(rec.recommended)}')" title="${this.esc(tip)}">Vee \u2192 ${lab}</button>`;
+  },
+
+  // adoptVeeRecommendation applies Vee's suggested action to the row
+  // (just like clicking the action button), then re-renders.
+  adoptVeeRecommendation(hash, action) {
+    if (!action) return;
+    this.setDecision(hash, action);
+  },
+
+  // _validationConsentKey + _validationConsentAccepted: per-validator
+  // first-use consent. Stored in localStorage. Free users confirm once
+  // per provider; Pro users can pre-accept all in Settings (later).
+  _validationConsentKey(validatorID) {
+    return 'vaultify_validation_consent_' + validatorID;
+  },
+  _validationConsentAccepted(validatorID) {
+    try { return localStorage.getItem(this._validationConsentKey(validatorID)) === 'yes'; }
+    catch (_) { return false; }
+  },
+  _validationConsentRecord(validatorID) {
+    try { localStorage.setItem(this._validationConsentKey(validatorID), 'yes'); } catch (_) {}
+  },
+
+  // runValidation kicks off an active validation for one finding.
+  // Pops the first-use consent dialog the very first time the user
+  // checks any given provider. Afterwards: spinner -> POST -> chip swap.
+  async runValidation(hash, validatorID) {
+    // Defensive: a 64-hex match_sha256 + a non-empty 16-hex session id
+    // are both required server-side. Bail out cleanly if either is
+    // missing so a stale row-click after a reset can't fire a 400.
+    const hexHash = /^[0-9a-f]{64}$/.test(String(hash || ''));
+    const hexSid = /^[0-9a-f]{16}$/.test(String(this.state.sessionId || ''));
+    if (!hexHash || !hexSid || !validatorID) {
+      this._showToast('Cannot check this row: stale or missing session.');
+      return;
+    }
+    if (!this._validationConsentAccepted(validatorID)) {
+      const ok = await this._showValidationConsent(validatorID);
+      if (!ok) return;
+      this._validationConsentRecord(validatorID);
+    }
+    const cell = document.getElementById('vf-status-cell-' + hash);
+    if (cell) cell.innerHTML = '<div class="vf-status-cell"><span class="vf-spinner-small" aria-label="Checking"></span></div>';
+
+    let resp;
+    try {
+      const r = await fetch('/api/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: this.state.sessionId, match_sha256: hash }),
+      });
+      if (r.status === 402) {
+        const body = await r.json().catch(() => ({}));
+        this.showToast((body && body.message) || 'This action is not available.', 'warning');
+        this._refreshSessionForRow();
+        return;
+      }
+      resp = await r.json();
+    } catch (e) {
+      resp = { status: 'error', reason: String(e && e.message || e) };
+    }
+
+    // Stitch the result into the in-memory group so a re-render keeps it.
+    const g = this._findGroupByHash(hash);
+    if (g) g._live_validation = { status: resp.status, reason: resp.reason, checked_at: resp.checked_at };
+    if (cell) cell.innerHTML = this._statusCell(g || { hash, locs: [{ heuristic_status: resp.status, validator_id: validatorID, vee_recommendation: null }] });
+
+    // If status is invalid/active, the recommendation may have changed.
+    // Re-render to refresh Vee chip + decision suggestion.
+    if (resp.status === 'invalid' || resp.status === 'active') {
+      this.renderReview();
+    }
+
+    if (typeof resp.quota_remaining === 'number') {
+      this._showToast(`Validated. ${resp.quota_remaining} free checks left this session.`);
+    }
+  },
+
+  _findGroupByHash(hash) {
+    const groups = this.getGroups();
+    for (const g of groups) {
+      if (g.hash === hash) return g;
+    }
+    return null;
+  },
+
+  // Bulk validation: refreshes cached live statuses for all supported rows.
+  async runBulkValidation() {
+    try {
+      const r = await fetch('/api/validate/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: this.state.sessionId, match_sha256s: [] }),
+      });
+      if (r.status === 402) {
+        const body = await r.json().catch(() => ({}));
+        this.showToast((body && body.message) || 'Bulk validation refused by server.', 'warning');
+        return;
+      }
+      const data = await r.json();
+      // Refresh the session to pick up the new cached statuses.
+      await this._refreshSessionForRow();
+      this._showToast(`Bulk validation complete: ${data.results ? data.results.length : 0} rows.`);
+    } catch (e) {
+      console.warn('bulk validate failed', e);
+    }
+  },
+
+  // Playbook (Pro). Stages the Vee recommendations into decisions.json
+  // and then opens the existing Apply modal so the user confirms.
+  async runPlaybook() {
+    try {
+      const r = await fetch('/api/playbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: this.state.sessionId, match_sha256s: [] }),
+      });
+      if (r.status === 402) {
+        const body = await r.json().catch(() => ({}));
+        this.showToast((body && body.message) || 'Playbook refused by server.', 'warning');
+        return;
+      }
+      const data = await r.json();
+      this._showToast(`Playbook staged ${data.rows ? data.rows.length : 0} decisions. Open Review to confirm.`);
+      await this._refreshSessionForRow();
+    } catch (e) {
+      console.warn('playbook failed', e);
+    }
+  },
+
+  // _refreshSessionForRow reloads the current session detail so chips
+  // and recommendations reflect the latest cache.
+  async _refreshSessionForRow() {
+    if (!this.state.sessionId) return;
+    try {
+      const detail = await (await fetch('/api/sessions/' + this.state.sessionId)).json();
+      this.state.findings = detail.findings || [];
+      this.renderReview();
+    } catch (_) {}
+  },
+
+  _showValidationConsent(validatorID) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'vf-consent-overlay';
+      overlay.innerHTML = `
+        <div class="vf-consent-card">
+          <div class="vf-consent-title">Live validation against <strong>${this.esc(validatorID)}</strong></div>
+          <div class="vf-consent-body">
+            Vaultify will make a single live API call from <strong>this machine</strong> to ${this.esc(validatorID)}.
+            The plaintext key never leaves your endpoint, but ${this.esc(validatorID)} will see the request and the source IP.
+            We cache the outcome by hash so repeat checks are free.
+          </div>
+          <div class="vf-consent-actions">
+            <button class="vf-consent-cancel">Cancel</button>
+            <button class="vf-consent-ok">Check, and don't ask again for ${this.esc(validatorID)}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('.vf-consent-ok').onclick = () => { document.body.removeChild(overlay); resolve(true); };
+      overlay.querySelector('.vf-consent-cancel').onclick = () => { document.body.removeChild(overlay); resolve(false); };
+    });
+  },
+
+  _showToast(msg) {
+    let t = document.getElementById('vfToast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'vfToast';
+      t.className = 'vf-toast';
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add('vf-toast--show');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => t.classList.remove('vf-toast--show'), 3500);
   },
 
   // --- APPLY MODAL ---
@@ -1964,7 +2416,7 @@ const App = {
     if (c.vault > 0) {
       try {
         const r = await (await fetch('/api/vaults/auth-status?refresh=1')).json();
-        authOk = !!r.onepassword_signed_in;
+        authOk = (r.vault_connected !== undefined) ? !!r.vault_connected : !!r.onepassword_signed_in;
       } catch (e) {}
       this.opSignedIn = authOk;
       this.renderVaultStatus();
@@ -1973,7 +2425,10 @@ const App = {
     let vaultHtml = '';
     if (c.vault > 0) {
       const op = this.vaultList.find(v => v.cli === 'op');
-      if (!op || !op.installed) {
+      if (this.selectedVaultProvider !== 'op') {
+        vaultHtml = `<div style="background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);border-radius:8px;padding:10px 14px;color:var(--err);font-size:.85rem;margin-top:12px">Vault apply uses <strong>1Password</strong> as the active vault. In the sidebar under <strong>Choose a Vault</strong>, select the <strong>1Password</strong> tile, connect the CLI, then open Apply again.</div>`;
+        authOk = false;
+      } else if (!op || !op.installed) {
         vaultHtml = `<div style="background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);border-radius:8px;padding:10px 14px;color:var(--err);font-size:.85rem;margin-top:12px">1Password CLI not installed. Install: <code>winget install -e --id AgileBits.1Password.CLI</code></div>`;
       } else if (!authOk) {
         vaultHtml = `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:10px 14px;color:var(--warn);font-size:.85rem;margin-top:12px">Vault not open. In the sidebar, click the <strong>1Password</strong> tile, then <strong>Open Vault</strong>, and try again.</div>`;
@@ -2007,13 +2462,6 @@ const App = {
       }
     }
 
-    let providerBanner = '';
-    if (c.vault > 0 && this.selectedVaultProvider !== 'op') {
-      const pv = (this.vaultList || []).find(x => x.cli === this.selectedVaultProvider);
-      const pname = pv ? pv.name : this.selectedVaultProvider;
-      providerBanner = `<div style="background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);border-radius:8px;padding:10px 14px;color:var(--accent);font-size:.82rem;margin-bottom:12px">You have <strong>${this.esc(pname)}</strong> selected in the sidebar. Apply still uses <strong>1Password</strong> until other vault backends are available.</div>`;
-    }
-
     body.innerHTML = `
       <div style="font-size:.85rem;margin-bottom:16px">
         <div style="display:flex;gap:20px;flex-wrap:wrap">
@@ -2023,13 +2471,12 @@ const App = {
           <div><span style="font-weight:700;font-size:1.3rem">${c.vault + c.remove + c.graveyard}</span><div style="color:var(--muted);font-size:.72rem;text-transform:uppercase">With action</div></div>
         </div>
       </div>
-      ${providerBanner}
       ${vaultHtml}
     `;
 
     const confirmBtn = document.getElementById('btnConfirmApply');
     const op = this.vaultList.find(v => v.cli === 'op');
-    const opReady = !!(op && op.installed && authOk);
+    const opReady = !!(this.selectedVaultProvider === 'op' && op && op.installed && authOk);
     confirmBtn.disabled = (c.vault > 0) && !opReady;
     this.updateVaultReadinessSection();
   },
@@ -2098,7 +2545,8 @@ const App = {
       pattern_id: d.pattern_id,
       locations: d.locations || [],
       item_name: nameInputs[hash] || '',
-      api_url: urlInputs[hash] || ''
+      api_url: urlInputs[hash] || '',
+      good_practice: !!d.good_practice
     }));
 
     try {
@@ -2223,29 +2671,32 @@ const App = {
     const d = new Date();
     const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
     document.querySelectorAll('.vaultify-footer').forEach(f => {
-      f.innerHTML = `Vaultify v0.1.7 &copy; ${d.getFullYear()} All Rights Reserved &mdash; Endpoint Credential Remediation &mdash; ${dateStr}`;
+      f.innerHTML = `Vaultify v${this.esc(this.currentVersion || '0.3.0')} &copy; ${d.getFullYear()} All Rights Reserved &mdash; Endpoint Credential Remediation &mdash; ${dateStr}`;
     });
   },
 
-  showProModal() {
-    const m = document.getElementById('proModal');
-    if (m) m.style.display = 'flex';
+  /**
+   * Legacy hook: upsell UI was removed for the open-source build.
+   * Any remaining onclick handlers route here and surface a toast.
+   */
+  showProModal(opts) {
+    const msg = (opts && opts.message) ? opts.message : 'That feature is not available in this build.';
+    this.showToast(msg, 'info');
   },
 
   hideProModal() {
-    const m = document.getElementById('proModal');
-    if (m) m.style.display = 'none';
+    if (this._proModalNavigateOnHide) {
+      const dest = this._proModalNavigateOnHide;
+      this._proModalNavigateOnHide = '';
+      this.navigate(dest);
+    }
   },
 
   showEnterpriseModal() {
-    const m = document.getElementById('enterpriseModal');
-    if (m) m.style.display = 'flex';
+    this.showToast('Fleet and org-wide dashboards are out of scope for this open-source scanner.', 'info');
   },
 
-  hideEnterpriseModal() {
-    const m = document.getElementById('enterpriseModal');
-    if (m) m.style.display = 'none';
-  },
+  hideEnterpriseModal() {},
 
   toggleAuditSort(c) {
     if (this.auditSort.col === c) this.auditSort.dir *= -1;
@@ -2305,7 +2756,7 @@ const App = {
   catalogueData: null,
   cataloguePage: 0,
   CATALOGUE_PAGE_SIZE: 15,
-  currentVersion: '0.1.7',
+  currentVersion: '0.3.0',
 
   async loadCatalogue() {
     if (this.catalogueData) { this.renderCatalogue(); return; }
@@ -2402,9 +2853,35 @@ const App = {
 
   releaseNotes: [
     {
-      version: '0.1.7',
+      version: '0.3.0',
       date: 'April 2026',
       current: true,
+      changes: [
+        { type: 'new', text: 'Secret Validation & Decision system — heuristic Status chip per Review row (LIKELY FAKE / LOOKS REAL / NO LIVE CHECK / ACTIVE / INVALID / ERROR); pure-local detection of placeholders, demo fixtures, repeated chars; risk-tuned color palette (active=red, invalid=green)' },
+        { type: 'new', text: 'Active validation: per-row [Check] button hits the real provider via vaultify.exe (never the browser); cached by match_sha256 in SQLite (never stores plaintext); audit-logged; first-use vendor-disclosure consent' },
+        { type: 'new', text: 'Validator registry: OpenAI, Anthropic, Gemini, Slack, GitHub (classic + fine-grained), Stripe, SendGrid (8 live); AWS marked unsupported until paired-secret pairing lands' },
+        { type: 'new', text: 'Vee recommendation engine — deterministic rules merge heuristic + active validation + severity into one suggested action per row (vault / remove / graveyard / keep / rotate) with reason + confidence; Adopt button in Review one-click applies' },
+        { type: 'new', text: 'Bulk validation + Apply & Secure Everything Playbook (Pro): worker-pool concurrency, stages Vee recommendations into decisions for one-click confirm' },
+        { type: 'new', text: 'Posture extension: validation_status flowed into posture rows; new "Active right now" headline card surfaces live keys still on disk' },
+        { type: 'new', text: 'Scheduled re-validation (Pro): daily background pass refreshes validation cache for present posture rows whose TTL expired' },
+        { type: 'new', text: 'FREE limit: 10 active per-row validations per session; Pro modal pops with contextual cap message when exceeded' },
+        { type: 'new', text: 'Embedded SQLite store (pure-Go, WAL, foreign-keys) replaces JSON-on-disk for sessions; one-shot non-destructive importer migrates legacy sessions on first boot' },
+        { type: 'new', text: 'Accumulated Posture (Pro) — 30-day rolling fingerprint of every distinct finding with present/removed lifecycle, drift tracking, and pruning' },
+        { type: 'new', text: 'Posture backfill — chronological replay of historical sessions through the posture engine, idempotent via app_state flag' },
+        { type: 'new', text: 'Activity page — Audit Log and Live Logs merged into one surface with Live stream / Audit ledger toggle' },
+        { type: 'new', text: 'Pro modal restructured as a mission-led FREE vs Pro comparison table with pricing and clear CTA' },
+        { type: 'new', text: 'Cross-platform shell branding: Vaultify icon embedded in vaultify.exe, Vaultify.app bundles for macOS, hicolor PNG set + .desktop template for Linux' },
+        { type: 'new', text: 'Tools: tools/icogen produces multi-resolution .ico, retina-aware .icns, and Linux PNG sets from one source PNG (pure stdlib, no external deps)' },
+        { type: 'new', text: 'Walkthrough refreshed — added Posture (Pro) and Activity stops; refreshed Vee Pro pitch' },
+        { type: 'new', text: 'Vee provider strip uses real ChatGPT/Claude/Gemini/Ollama logos instead of placeholder marks' },
+        { type: 'perf', text: 'Posture merge runs in a single transaction with INSERT OR IGNORE remediation tracking; per-scan auto-credit of vault_ref findings' },
+        { type: 'fix', text: 'Reports remediation column credits good_practice graveyard actions and op:// vault references' },
+        { type: 'fix', text: 'Cap-hit Pro modal pops with contextual message before navigating to Review for Free-tier scans that hit the 10K-file cap' },
+      ]
+    },
+    {
+      version: '0.1.7',
+      date: 'April 2026',
       changes: [
         { type: 'new', text: 'Context Detection Layer — identifies secrets by variable name (api_key, password, secret_access, db_url) in assignment patterns' },
         { type: 'new', text: 'Sequenced detection pipeline: Pre-validate → Layer 2 Context → Layer 1 Value Patterns → Post-validate with confidence scoring' },
@@ -2491,14 +2968,26 @@ const App = {
   async loadVersion() {
     try {
       const v = await (await fetch('/api/version')).json();
+      if (typeof v.file_cap === 'number') this.state.file_cap = v.file_cap;
+      if (v.edition) this.edition = String(v.edition).toLowerCase();
       const el = document.getElementById('versionContent');
       if (!el) return;
+      const ed = (v.edition || 'open').toLowerCase();
+      const edHtml = ed === 'open' || ed === 'oss'
+        ? '<strong style="font-size:1.08em;letter-spacing:.06em;color:var(--c-cyan)">Open source</strong>'
+        : '<strong style="font-size:1.08em;letter-spacing:.06em;color:var(--c-cyan)">' + this.esc(ed.toUpperCase()) + '</strong>';
+      const capNum = typeof v.file_cap === 'number' ? v.file_cap : parseInt(String(v.file_cap), 10);
+      const capLabel = (typeof v.file_cap === 'number' && v.file_cap === 0) || (Number.isFinite(capNum) && capNum === 0)
+        ? 'Unlimited'
+        : (Number.isFinite(capNum) && !Number.isNaN(capNum) ? this.esc(Number(capNum).toLocaleString()) : this.esc(String(v.file_cap ?? '')));
       el.innerHTML = `<div style="font-size:.9rem;display:grid;grid-template-columns:140px 1fr;gap:8px 16px;padding:8px 0">
         <span style="color:var(--c-slate)">Version</span><span style="font-weight:700;color:var(--c-cyan)">${this.esc(v.version)}</span>
+        <span style="color:var(--c-slate)">Edition</span><span>${edHtml}</span>
+        <span style="color:var(--c-slate)">Scan file cap</span><span>${capLabel}</span>
         <span style="color:var(--c-slate)">Build</span><span>${this.esc(v.build)}</span>
         <span style="color:var(--c-slate)">OS</span><span>${this.esc(v.os)}</span>
         <span style="color:var(--c-slate)">Architecture</span><span>${this.esc(v.arch)}</span>
-        <span style="color:var(--c-slate)">Domain</span><span><a href="https://vaultify.live" target="_blank" style="color:var(--c-indigo)">vaultify.live</a></span>
+        <span style="color:var(--c-slate)">Domain</span><span><a href="https://vaultify.live" target="_blank" rel="noopener noreferrer" style="color:var(--c-indigo)">vaultify.live</a></span>
       </div>`;
 
       const notesEl = document.getElementById('releaseNotes');
@@ -2542,22 +3031,203 @@ const App = {
 
   renderVeeProviders() {
     const el = document.getElementById('veeProviders');
-    if (!el) return;
     this.updateVeeChatState();
+    if (!el) return;
     const logos = {
-      openai: `<img src="/assets/vee-logo-gpt.svg" alt="" class="vee-prov-logo-img" width="26" height="26" loading="lazy">`,
-      anthropic: `<img src="/assets/vee-logo-claude.svg" alt="" class="vee-prov-logo-img" width="26" height="26" loading="lazy">`,
-      gemini: `<svg width="24" height="24" viewBox="0 0 28 28"><defs><linearGradient id="gg" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#4285F4"/><stop offset=".5" stop-color="#9B72CB"/><stop offset="1" stop-color="#D96570"/></linearGradient></defs><path d="M14 28C14 21.4 8.8 14 0 14c8.8 0 14-7.4 14-14 0 8.8 5.2 14 14 14-8.8 0-14 7.4-14 14z" fill="url(#gg)"/></svg>`,
-      ollama: `<span style="font-size:1.3rem">🦙</span>`
+      openai: `<img src="/assets/chatgpt-logo.jpg" alt="" class="vee-prov-logo-img" width="28" height="28" loading="lazy">`,
+      anthropic: `<img src="/assets/claude_logo.png" alt="" class="vee-prov-logo-img" width="28" height="28" loading="lazy">`,
+      gemini: `<img src="/assets/gemini_logo.png" alt="" class="vee-prov-logo-img" width="28" height="28" loading="lazy">`,
+      ollama: `<img src="/assets/ollama.png" alt="" class="vee-prov-logo-img" width="28" height="28" loading="lazy">`
     };
     el.innerHTML = this.veeProviders.map(p => {
       const active = this.veeProvider === p.id;
-      return `<div class="vee-prov-card ${active ? 'active' : ''} ${p.available ? 'available' : ''}" onclick="App.selectVeeProvider('${p.id}')" title="${p.name} (${p.model})">${logos[p.id] || '?'}<span style="font-size:.6rem;margin-top:2px">${p.name}</span></div>`;
+      const dot = this._veeValidationDot(p);
+      const title = [p.name, p.model && p.model !== 'default' ? p.model : '', this._veeProvenanceTooltip(p)].filter(Boolean).join(' · ');
+      return `<div class="vee-prov-card ${active ? 'active' : ''} ${p.available ? 'available' : ''}" onclick="App.selectVeeProvider('${p.id}')" title="${this.esc(title)}">${logos[p.id] || '?'}${dot}<span style="font-size:.6rem;margin-top:2px">${p.name}</span></div>`;
     }).join('');
     const label = document.getElementById('veeProvLabel');
     if (label) {
       const active = this.veeProviders.find(p => p.id === this.veeProvider);
       label.textContent = active ? `Using ${active.name}${active.model ? ' · ' + active.model : ''}` : 'Select a provider to start';
+    }
+    // Once we have a shallow provider list, kick off background
+    // validation of every stored key so the green/red dots reflect the
+    // current provider state without the user running a chat.
+    this._veeValidateStoredKeysSoon();
+    this._renderVeeProvenance();
+  },
+
+  _veeValidationDot(p) {
+    if (!p.needs_key) return '';
+    if (!p.has_key) return '';
+    const st = p.key_last_validated_status || 'never';
+    const cls = ({ ok: 'ok', unauthorized: 'err', rate_limited: 'warn', network: 'warn', unknown: 'warn', no_models: 'warn', never: 'muted' })[st] || 'muted';
+    return `<span class="vee-prov-dot vee-prov-dot-${cls}" title="Key status: ${this.esc(st)}"></span>`;
+  },
+
+  _veeProvenanceTooltip(p) {
+    if (!p.needs_key) return '';
+    if (!p.has_key) return 'No key stored';
+    if (p.key_source === 'vault') return `from ${this._shortVaultLocation(p.vault_location)}`;
+    if (p.key_source === 'user_entered') return 'entered in this session';
+    return 'key source unknown';
+  },
+
+  _shortVaultLocation(loc) {
+    if (!loc) return 'vault';
+    const m = /^op:\/\/([^/]+)\/(.+?)\/credential$/.exec(loc);
+    if (!m) return loc;
+    return `op://${m[1]}/${m[2]}`;
+  },
+
+  /** Renders the "Key loaded from op://..., validated 3s ago" line. */
+  _renderVeeProvenance() {
+    const el = document.getElementById('veeProvProvenance');
+    if (!el) return;
+    const p = (this.veeProviders || []).find(x => x.id === this.veeProvider);
+    if (!p || !p.needs_key) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    if (!p.has_key) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    const parts = [];
+    if (p.key_source === 'vault' && p.vault_location) {
+      parts.push(`<span class="vee-prov-source-vault">Key loaded from vault</span> · <code>${this.esc(this._shortVaultLocation(p.vault_location))}</code>`);
+    } else if (p.key_source === 'user_entered') {
+      parts.push(`<span class="vee-prov-source-user">Key entered in this session</span>`);
+    } else {
+      parts.push(`Key source unknown`);
+    }
+    if (p.model && p.model !== 'default') {
+      parts.push(`model <code>${this.esc(p.model)}</code>${p.model_source === 'vault' ? ' (from vault)' : ''}`);
+    }
+    if (p.key_last_validated_status && p.key_last_validated_status !== 'never') {
+      const statusMap = { ok: 'validated', unauthorized: 'unauthorized', rate_limited: 'rate limited', network: 'network error', no_models: 'no models', unknown: 'unknown', no_key: 'no key' };
+      const pretty = statusMap[p.key_last_validated_status] || p.key_last_validated_status;
+      const rel = this._relativeTime(p.key_last_validated_at);
+      parts.push(`${this.esc(pretty)}${rel ? ' ' + rel : ''}`);
+    } else if (p.has_key) {
+      parts.push(`not validated yet`);
+    }
+    el.style.display = '';
+    el.innerHTML = parts.join(' · ');
+  },
+
+  _relativeTime(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return '';
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 5) return 'just now';
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s / 60)}m ago`;
+    return `${Math.round(s / 3600)}h ago`;
+  },
+
+  async openVeeSettings() {
+    const overlay = document.getElementById('veeSettingsOverlay');
+    const body = document.getElementById('veeSettingsBody');
+    if (!overlay || !body) return;
+    overlay.style.display = 'flex';
+    body.textContent = 'Loading vaults...';
+    try {
+      const settings = await (await fetch('/api/vee/settings')).json();
+      this._veeSettings = settings;
+      let vaults = [];
+      try { vaults = await (await fetch('/api/vaults/list-1p')).json(); } catch (_) {}
+      const current = (settings && settings.vee_vault_name) || 'Vaultify';
+      let opts = '';
+      (vaults || []).forEach(v => {
+        const sel = v.name === current ? ' selected' : '';
+        opts += `<option value="${this.esc(v.name)}"${sel}>${this.esc(v.name)} (${v.items} items)</option>`;
+      });
+      const customSel = (vaults || []).some(v => v.name === current) ? '' : ' selected';
+      opts += `<option value="__custom__"${customSel}>Type a custom vault name…</option>`;
+      body.innerHTML = `
+        <label style="font-size:.78rem;color:var(--muted);display:block;margin-bottom:4px">Vault for Vee LLM keys</label>
+        <select id="veeSettingsSelect" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.85rem;margin-bottom:10px" onchange="document.getElementById('veeSettingsCustom').style.display=this.value==='__custom__'?'block':'none'">${opts}</select>
+        <input id="veeSettingsCustom" placeholder="Vault name (e.g. Personal)" value="${this.esc(current)}" style="display:${customSel ? 'block' : 'none'};width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.85rem">
+        <div style="font-size:.72rem;color:var(--muted);margin-top:10px;line-height:1.45">Changing the vault forgets last-validated status. Vee will re-check when you open the panel.</div>
+      `;
+    } catch (e) {
+      body.innerHTML = `<div style="color:var(--err);font-size:.82rem">Could not load vault list: ${this.esc(String(e.message || e))}</div>`;
+    }
+  },
+
+  closeVeeSettings() {
+    const overlay = document.getElementById('veeSettingsOverlay');
+    if (overlay) overlay.style.display = 'none';
+  },
+
+  async saveVeeSettings() {
+    const sel = document.getElementById('veeSettingsSelect');
+    const custom = document.getElementById('veeSettingsCustom');
+    let name = sel ? sel.value : '';
+    if (name === '__custom__' || !sel) name = custom ? custom.value.trim() : '';
+    if (!name) name = 'Vaultify';
+    const btn = document.getElementById('btnSaveVeeSettings');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    try {
+      const r = await (await fetch('/api/vee/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vee_vault_name: name })
+      })).json();
+      this.showToast(`Vee vault set to "${r.vee_vault_name}".`, 'success');
+      this.closeVeeSettings();
+      this._veeValidateLastRun = 0; // force re-validate with new vault
+      await this.loadVeeProviders(true);
+    } catch (e) {
+      this.showToast('Failed to save Vee vault settings.', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+    }
+  },
+
+  _veeValidateStoredKeysSoon() {
+    clearTimeout(this._veeValidateStoredKeysTimer);
+    this._veeValidateStoredKeysTimer = setTimeout(() => {
+      this._veeValidateAllStoredKeys();
+    }, 350);
+  },
+
+  async _veeValidateAllStoredKeys() {
+    if (!Array.isArray(this.veeProviders)) return;
+    const provs = this.veeProviders.filter(p => p.needs_key && p.has_key);
+    if (!provs.length) return;
+    // Skip if we validated very recently. The previous 60 s throttle
+    // was too aggressive: every renderVeeProviders call (panel open,
+    // provider click, settings save) re-rendered, and any pause >60 s
+    // re-fired three parallel /api/vee/validate-stored-key requests,
+    // each of which `op read`s a vault secret — three Windows Hello /
+    // 1Password authorize popups in quick succession even though the
+    // user was already authorized. 5 minutes lines up with the
+    // server-side veeKeyCacheTTL so we don't pay the popup tax twice
+    // for the same cache window.
+    const now = Date.now();
+    if (this._veeValidateLastRun && now - this._veeValidateLastRun < 5 * 60 * 1000) return;
+    this._veeValidateLastRun = now;
+    // Validate sequentially, not in parallel. With server-side caching
+    // in place the SECOND and third reads no longer hit `op`, but the
+    // FIRST read for each provider still does — running them in
+    // parallel meant three concurrent op subprocesses, each capable of
+    // raising its own desktop prompt. Sequentialising means the user
+    // sees at most one prompt at a time, and once any provider primes
+    // the cache the others slip past `op` entirely.
+    for (const p of provs) {
+      try { await this._veeValidateStoredKey(p.id); } catch (_) {}
+    }
+    // Reload provider list so last_validated_* propagates into cards.
+    try { await this.loadVeeProviders(true); } catch (_) {}
+  },
+
+  async _veeValidateStoredKey(provider) {
+    try {
+      const resp = await fetch('/api/vee/validate-stored-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider })
+      });
+      return await resp.json();
+    } catch (e) {
+      return null;
     }
   },
 
@@ -2588,7 +3258,10 @@ const App = {
       return;
     }
     if (p.needs_key && p.has_key) {
-      if (this.veeProvider === id) return;
+      if (this.veeProvider === id) {
+        this.updateVeeChatState();
+        return;
+      }
       this.veeProvider = id;
       document.getElementById('veeKeyArea').innerHTML = '';
       this.renderVeeProviders();
@@ -2620,11 +3293,16 @@ const App = {
       })).json();
 
       if (!r.valid || !r.models || !r.models.length) {
-        area.innerHTML = `<div style="padding:8px 20px"><div style="color:var(--err);font-size:.82rem;margin-bottom:8px">Invalid key or no models available.</div><input type="password" id="veeKeyInput" value="${this.esc(key)}" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.82rem;margin-bottom:6px"><button class="vee-send" onclick="App.validateVeeKey('${provider}')" style="width:100%;padding:8px;font-size:.82rem">Try Again</button></div>`;
+        const reasonMsg = this._veeReasonToMessage(r.reason);
+        area.innerHTML = `<div style="padding:8px 20px"><div style="color:var(--err);font-size:.82rem;margin-bottom:8px">${this.esc(reasonMsg)}</div><input type="password" id="veeKeyInput" value="${this.esc(key)}" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.82rem;margin-bottom:6px"><button class="vee-send" onclick="App.validateVeeKey('${provider}')" style="width:100%;padding:8px;font-size:.82rem">Try Again</button></div>`;
         return;
       }
 
-      this._pendingVeeKey = key;
+      // Server holds the key behind the token; the browser forgets it.
+      this._veeValidationToken = r.validation_token || '';
+      // Legacy fallback only for older servers without token support.
+      this._pendingVeeKey = r.validation_token ? '' : key;
+
       let opts = r.models.map(m => `<option value="${this.esc(m)}">${this.esc(m)}</option>`).join('');
       area.innerHTML = `<div style="padding:8px 20px"><div style="color:var(--ok);font-size:.82rem;margin-bottom:8px">✓ Key valid — ${r.models.length} model(s) available</div><select id="veeModelSelect" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:.82rem;margin-bottom:6px">${opts}</select><button class="vee-send" onclick="App.storeVeeKey('${provider}')" style="width:100%;padding:8px;font-size:.82rem">Store Key &amp; Model in Vault</button></div>`;
     } catch (e) {
@@ -2632,26 +3310,42 @@ const App = {
     }
   },
 
+  _veeReasonToMessage(reason) {
+    switch ((reason || '').toLowerCase()) {
+      case 'unauthorized': return 'Provider says the key is not authorized (401/403). Double-check you copied it correctly.';
+      case 'rate_limited': return 'Provider rate limit hit. Wait a moment and try again.';
+      case 'network': return 'Could not reach the provider. Check your internet connection or proxy.';
+      case 'no_models': return 'Key validated but no usable models were returned.';
+      case 'unknown_provider': return 'Unknown provider — this should not happen, please report.';
+      default: return 'Invalid key or no models available.';
+    }
+  },
+
   async storeVeeKey(provider) {
     if (!(await this.ensureOpSessionForVaultFeatures())) return;
     const modelSelect = document.getElementById('veeModelSelect');
     const model = modelSelect ? modelSelect.value : '';
-    const key = this._pendingVeeKey || '';
-    if (!key) return;
+    const token = this._veeValidationToken || '';
+    const legacyKey = this._pendingVeeKey || '';
+    if (!token && !legacyKey) return;
+
+    const body = token ? { provider, validation_token: token, model } : { provider, key: legacyKey, model };
 
     try {
       const r = await (await fetch('/api/vee/key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, key, model })
+        body: JSON.stringify(body)
       })).json();
       if (r.stored) {
         document.getElementById('veeKeyArea').innerHTML = '';
+        this._veeValidationToken = '';
         this._pendingVeeKey = '';
         this.veeProvider = provider;
         await this.loadVeeProviders(true);
         const p = this.veeProviders.find(x => x.id === provider);
-        this.addVeeMsg('vee', `Key and model stored in vault. Using ${p ? p.name : provider} (${r.model || model}). How can I help?`);
+        const changedMsg = r.changed === false ? ' (already up to date)' : '';
+        this.addVeeMsg('vee', `Key and model stored in ${this.esc(r.vault || 'vault')}${changedMsg}. Using ${p ? p.name : provider} (${r.model || model}). How can I help?`);
       }
     } catch (e) {
       this.addVeeMsg('vee', 'Failed to store key. Make sure your vault is open first.');
@@ -2691,14 +3385,44 @@ const App = {
 
   async veeSend() {
     const input = document.getElementById('veeInput');
+    if (!input) return;
     const msg = input.value.trim();
     if (!msg) return;
     if (!this.veeProvider) return;
     if (!(await this.ensureOpSessionForVaultFeatures())) return;
     input.value = '';
     this.addVeeMsg('user', msg);
-    const thinking = this.addVeeMsg('vee', 'Thinking...');
-    thinking.querySelector('.msg-body').innerHTML = '<span style="color:var(--muted)"><div class="vf-spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Thinking...</span>';
+    const thinking = this.addVeeMsg('vee', '');
+    const body = thinking.querySelector('.msg-body');
+
+    // Rotating progress messages give the user visible feedback while
+    // an upstream LLM (especially OpenAI gpt-* models) takes its time
+    // to produce the first byte. We swap the spinner+label every ~2.4 s
+    // so the panel never looks frozen, then cancel the rotation as
+    // soon as the first chunk arrives. Messages are deliberately
+    // domain-flavoured (provider/role) rather than generic.
+    const providerLabel = (this.veeProviders.find(p => p.id === this.veeProvider) || {}).name || 'AI';
+    const veePhases = [
+      `Reaching out to ${providerLabel}…`,
+      'Reviewing your scan context…',
+      'Thinking through the findings…',
+      'Drafting a response…',
+      'Almost there…',
+    ];
+    const renderPhase = (text) => {
+      body.innerHTML = '<span style="color:var(--muted)"><div class="vf-spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:6px"></div><span class="vee-phase-text">' + this.esc(text) + '</span></span>';
+    };
+    let phaseIdx = 0;
+    renderPhase(veePhases[0]);
+    const phaseTimer = setInterval(() => {
+      phaseIdx = Math.min(phaseIdx + 1, veePhases.length - 1);
+      renderPhase(veePhases[phaseIdx]);
+    }, 2400);
+    const stopPhaseRotation = () => { if (phaseTimer) clearInterval(phaseTimer); };
+
+    const chat = document.getElementById('veeChat');
+    const atBottom = () => chat && (chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80);
+    const scrollIfNearBottom = () => { if (chat && atBottom()) chat.scrollTop = chat.scrollHeight; };
 
     try {
       const resp = await fetch('/api/vee/chat', {
@@ -2716,11 +3440,59 @@ const App = {
           }
         })
       });
-      const text = await resp.text();
-      thinking.querySelector('.msg-body').innerHTML = this.formatVeeText(text);
-      document.getElementById('veeChat').scrollTop = document.getElementById('veeChat').scrollHeight;
+      if (!resp.ok) {
+        stopPhaseRotation();
+        const text = await resp.text();
+        let errMsg = text || resp.statusText;
+        try {
+          const j = JSON.parse(text);
+          if (j && typeof j.error === 'string' && j.error) errMsg = j.error;
+        } catch (_) {}
+        body.innerHTML = `<span style="color:var(--err)">${this.esc(errMsg)}</span>`;
+        scrollIfNearBottom();
+        return;
+      }
+
+      // Token-by-token render. Server sends raw text deltas (no SSE
+      // framing on this hop). We decode bytes → chars → formatted HTML
+      // after each chunk so the user sees the answer grow in real time.
+      const reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
+      if (!reader) {
+        stopPhaseRotation();
+        const text = await resp.text();
+        body.innerHTML = this.formatVeeText(text);
+        scrollIfNearBottom();
+        return;
+      }
+      const decoder = new TextDecoder('utf-8');
+      let acc = '';
+      let firstChunk = true;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (firstChunk) {
+          // First byte from upstream: kill the rotating phase indicator
+          // and clear the placeholder so the streamed reply starts in a
+          // clean container instead of overlapping the spinner.
+          stopPhaseRotation();
+          body.innerHTML = '';
+          firstChunk = false;
+        }
+        acc += decoder.decode(value, { stream: true });
+        body.innerHTML = this.formatVeeText(acc);
+        scrollIfNearBottom();
+      }
+      acc += decoder.decode();
+      stopPhaseRotation();
+      body.innerHTML = this.formatVeeText(acc);
+      scrollIfNearBottom();
     } catch (e) {
-      thinking.querySelector('.msg-body').innerHTML = `<span style="color:var(--err)">Sorry, something went wrong. ${this.esc(e.message)}</span>`;
+      stopPhaseRotation();
+      body.innerHTML = `<span style="color:var(--err)">Sorry, something went wrong. ${this.esc(e.message)}</span>`;
+    } finally {
+      // Defensive: covers any code path that returns without explicitly
+      // stopping the timer (e.g. future early returns).
+      stopPhaseRotation();
     }
   },
 
@@ -2745,8 +3517,30 @@ const App = {
           provider: this.veeProvider
         })
       });
-      const text = await resp.text();
-      sumEl.innerHTML = `<div class="card" style="margin-top:22px"><div class="card-title">Remediation Summary <span class="badge">by Vee</span></div><div style="font-size:.88rem;line-height:1.7">${this.formatVeeText(text)}</div></div>`;
+      if (!resp.ok) {
+        const errText = await resp.text();
+        sumEl.innerHTML = `<div class="card" style="margin-top:22px"><div class="card-title">Remediation Summary</div><div style="color:var(--err);padding:16px">${this.esc(errText || resp.statusText)}</div></div>`;
+        return;
+      }
+      const titleHtml = `<div class="card" style="margin-top:22px"><div class="card-title">Remediation Summary <span class="badge">by Vee</span></div><div id="remediationSummaryBody" style="font-size:.88rem;line-height:1.7"></div></div>`;
+      sumEl.innerHTML = titleHtml;
+      const target = document.getElementById('remediationSummaryBody');
+      const reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
+      if (!reader) {
+        const text = await resp.text();
+        if (target) target.innerHTML = this.formatVeeText(text);
+      } else {
+        const decoder = new TextDecoder('utf-8');
+        let acc = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          if (target) target.innerHTML = this.formatVeeText(acc);
+        }
+        acc += decoder.decode();
+        if (target) target.innerHTML = this.formatVeeText(acc);
+      }
       this.addVeeMsg('vee', 'Summary generated \u2014 see it below the Review table.');
     } catch (e) {
       sumEl.innerHTML = `<div class="card" style="margin-top:22px"><div class="card-title">Remediation Summary</div><div style="color:var(--err);padding:16px">Summary generation failed. ${this.esc(e.message)}</div></div>`;
@@ -2777,7 +3571,7 @@ const App = {
   },
 
   async _fallbackDemoScan() {
-    this.state = { status: 'running', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 100, file_cap: 100000, pattern_totals: [], findings: [] };
+    this.state = { status: 'running', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 100, file_cap: this.state.file_cap, pattern_totals: [], findings: [] };
     this.decisions = {};
     this._patternEls = {};
     const patEl = document.getElementById('patterns');
@@ -2876,33 +3670,11 @@ const App = {
         target: null,
         page: 'dashboard',
         position: 'right',
-        targetSelector: '.pro-nav-item',
-        title: 'Vee Pro',
-        text: "See the golden crowns? That's Vee Pro — expanded pattern graph with zoom and inspect, CSV exports, shared reports, custom patterns, scheduled scans. Power tools for power users. If you want to come and meet me there, just click when you're ready. I'd love that!",
-        avatar: '/assets/vee-pro.png',
-        pro: true,
-        beforeStep: async () => {
-          document.querySelectorAll('.pro-nav-item').forEach(el => { el.classList.add('pro-blink'); });
-        },
-        afterStep: async () => {
-          document.querySelectorAll('.pro-nav-item').forEach(el => { el.classList.remove('pro-blink'); });
-        }
-      },
-      {
-        target: null,
-        page: 'dashboard',
-        position: 'right',
-        targetSelector: '.ent-nav-item',
-        title: 'Vee Enterprise',
-        text: "And the diamonds? That's me in a suit. Enterprise grade — Unified Fleet Dashboard, Compliance Evidence Collection, Policy Settings, centralised reporting. Built for organisations of 50 to 5,000. When you're ready for the big leagues, I'll be waiting.",
-        avatar: '/assets/vee-enterprise.png',
-        pro: true,
-        beforeStep: async () => {
-          document.querySelectorAll('.ent-nav-item').forEach(el => { el.classList.add('pro-blink'); });
-        },
-        afterStep: async () => {
-          document.querySelectorAll('.ent-nav-item').forEach(el => { el.classList.remove('pro-blink'); });
-        }
+        targetSelector: '[data-page="posture"]',
+        title: 'Posture and Activity',
+        text: "Posture keeps a rolling 30-day fingerprint of distinct findings so you can see drift and removals, not just the last scan. Activity merges live server logs with the on-disk audit ledger when you need to trace what happened.",
+        beforeStep: async () => { document.querySelectorAll('[data-page="posture"],[data-page="activity"]').forEach(el => { el.classList.add('pro-blink'); }); },
+        afterStep: async () => { document.querySelectorAll('[data-page="posture"],[data-page="activity"]').forEach(el => { el.classList.remove('pro-blink'); }); }
       },
       {
         target: null,
@@ -2918,7 +3690,7 @@ const App = {
         page: 'dashboard',
         position: 'right',
         title: 'Choose a Vault',
-        text: "Choose a Vault sits under Walkthrough: four provider tiles in a two-by-two grid. Click a tile to set your sync focus for the app — 1Password is the default. Tiles show a quick shimmer while vault status loads. For 1Password, use the install link if needed, unlock the desktop app, enable CLI integration, then Open Vault on this tile. When you return to Vaultify, I recheck the session so the UI stays honest. Apply and Vee still use 1Password for vault operations until other backends arrive.",
+        text: "Choose a Vault sits under Walkthrough: four provider tiles in a two-by-two grid. 1Password and AWS SSM are selectable today; HashiCorp Vault and Doppler show as coming later. 1Password is the default. For 1Password, use the install link if needed, unlock the desktop app, enable CLI integration, then Open Vault on this tile. When you return to Vaultify, I recheck the session so the UI stays honest. Heads-up: moving live secrets into the vault or swapping them for op:// references can break apps that still read plain values from disk at runtime until you rewire config.",
         beforeStep: async () => { document.getElementById('sidebarVaultSection')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); await new Promise(r => setTimeout(r, 350)); }
       },
       {
@@ -2987,7 +3759,7 @@ const App = {
         page: 'review',
         position: 'bottom',
         title: 'Apply & Remediate',
-        text: "Hit Apply Decisions — pick the 1Password vault, name your items, confirm. Stay signed in via the 1Password tile in Choose a Vault first. One confirmation: secrets move into 1Password, risky code gets redacted, dismissals are logged. Full audit trail."
+        text: "Hit Apply Decisions — pick the 1Password vault, name your items, confirm. Stay signed in via the 1Password tile in Choose a Vault first. One confirmation: secrets move into 1Password, risky code gets redacted, dismissals are logged. Full audit trail. If a service still reads those files directly, plan a config change or secret injection path so production does not stall."
       },
       {
         target: null,
@@ -2996,6 +3768,25 @@ const App = {
         targetSelector: '#reportsContent',
         title: 'Reports & Governance',
         text: "Every scan is tracked here. Remediation progress bars, archive for old sessions. This is your evidence trail for audits and due diligence."
+      },
+      {
+        target: null,
+        page: 'dashboard',
+        position: 'right',
+        targetSelector: '[data-page="posture"]',
+        title: 'Accumulated Posture',
+        text: "Open Posture anytime from the sidebar. Each row is a unique pattern + path + value-hash. When something disappears from a re-scan, it flips to Removed for the rest of the 30-day window so you can show remediation actually happened.",
+        beforeStep: async () => { document.querySelectorAll('[data-page="posture"]').forEach(el => el.classList.add('pro-blink')); },
+        afterStep: async () => { document.querySelectorAll('[data-page="posture"]').forEach(el => el.classList.remove('pro-blink')); }
+      },
+      {
+        target: null,
+        page: 'activity',
+        position: 'top',
+        targetSelector: '.activity-view-toggle',
+        title: 'One Activity Stream',
+        text: "Audit log and live server logs live together here. Live stream shows everything the server is doing right now — HTTP, the op CLI, vault auth flips, Vee, scans, posture merges — correlated by request id. Audit ledger is the persistent governance record kept on disk for export and review.",
+        beforeStep: async () => { App.setActivityView && App.setActivityView('live'); }
       },
       {
         target: '#catalogueContent',
@@ -3205,7 +3996,7 @@ const App = {
       </div>`;
 
       // Reset demo state
-      App.state = { status: 'idle', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: 100000, pattern_totals: [], findings: [] };
+      App.state = { status: 'idle', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: App.state.file_cap, pattern_totals: [], findings: [] };
       App.decisions = {};
       App._patternEls = {};
       App.updateDashboard(); App.updateButtons(); App.updateNav();
@@ -3213,5 +4004,17 @@ const App = {
     }
   }
 };
+
+// Attach every extracted ES-module controller. Each call installs
+// methods/state onto App, so inline onclick handlers continue to work
+// and legacy call sites find their functions where they used to live.
+attachLogsController(App);
+attachPostureController(App);
+
+// Expose App as a global so inline attribute handlers keep resolving
+// it. Using <script type="module"> means variables declared at the top
+// level are module-scoped by default, which would otherwise break
+// every onclick="App.foo()" in the HTML.
+window.App = App;
 
 document.addEventListener('DOMContentLoaded', () => App.init());

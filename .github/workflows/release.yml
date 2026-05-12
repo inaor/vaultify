@@ -50,7 +50,7 @@ jobs:
           OUT="vaultify_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.suffix }}"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           go build -trimpath -buildvcs=false \
-            -ldflags="-s -w -X main.version=${VERSION}" \
+            -ldflags="-s -w -X github.com/vaultify/vaultify/internal/buildinfo.BuildVersion=${VERSION}" \
             -o "$OUT" ./cmd/vaultify
           if [ "${{ matrix.goos }}" != "windows" ]; then chmod +x "$OUT"; fi
           ls -la "$OUT"
@@ -72,9 +72,14 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Stage release assets
         run: |
           set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
           find artifacts -type f \( -name 'vaultify_*' -o -name 'vaultify_*.exe' \) -print -exec cp -f {} dist/ \;
           if [ ! "$(find dist -maxdepth 1 -type f -name 'vaultify_*' | wc -l)" -ge 1 ]; then
@@ -89,8 +94,49 @@ jobs:
               *) chmod +x "$f" ;;
             esac
           done
+
+          # Generate per-platform icon assets so the release ships the
+          # same shell-level branding on macOS and Linux that Windows
+          # gets via the embedded .syso resource.
+          go run ./tools/icogen -format icns    -in internal/web/assets/vaultify_logo.png -out dist/Vaultify.icns
+          go run ./tools/icogen -format png-set -in internal/web/assets/vaultify_logo.png -out dist/linux-icons
+          ( cd dist && tar czf vaultify_${VERSION}_linux-icons.tar.gz linux-icons )
+
+          # Wrap each darwin binary in a Vaultify.app bundle so users
+          # get a native macOS app icon in Finder/Dock without having
+          # to assemble the bundle themselves.
+          for arch in amd64 arm64; do
+            BIN="dist/vaultify_${VERSION}_darwin_${arch}"
+            [ -f "$BIN" ] || continue
+            APPDIR="dist/Vaultify-${arch}.app"
+            mkdir -p "$APPDIR/Contents/MacOS" "$APPDIR/Contents/Resources"
+            cp -f "$BIN" "$APPDIR/Contents/MacOS/vaultify"
+            chmod +x "$APPDIR/Contents/MacOS/vaultify"
+            cp -f dist/Vaultify.icns "$APPDIR/Contents/Resources/AppIcon.icns"
+            cat > "$APPDIR/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Vaultify</string>
+            <key>CFBundleDisplayName</key><string>Vaultify</string>
+            <key>CFBundleIdentifier</key><string>app.vaultify.cli</string>
+            <key>CFBundleExecutable</key><string>vaultify</string>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>LSMinimumSystemVersion</key><string>10.15</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+            ( cd dist && tar czf "vaultify_${VERSION}_darwin_${arch}.app.tar.gz" "Vaultify-${arch}.app" )
+            rm -rf "$APPDIR"
+          done
+
           cp -f LICENSE dist/LICENSE
-          ( cd dist && sha256sum vaultify_* > SHA256SUMS )
+          # Hash binaries AND ancillary release assets (icons, bundles)
+          # so users can verify the icon set wasn't tampered with.
+          ( cd dist && sha256sum vaultify_* Vaultify.icns > SHA256SUMS )
           echo "---- SHA256SUMS ----"
           cat dist/SHA256SUMS
           ls -la dist
@@ -106,12 +152,13 @@ jobs:
 
             | Asset | Platform |
             |-------|----------|
-            | `vaultify_*_windows_amd64.exe` | Windows (x86_64) |
-            | `vaultify_*_darwin_amd64` | macOS Intel |
-            | `vaultify_*_darwin_arm64` | macOS Apple Silicon |
-            | `vaultify_*_linux_amd64` | Linux (x86_64) |
-            | `vaultify_*_linux_arm64` | Linux (ARM64) |
-            | `SHA256SUMS` | SHA-256 hashes for the binaries above |
+            | `vaultify_*_windows_amd64.exe` | Windows (x86_64) — icon embedded in the binary |
+            | `vaultify_*_darwin_amd64` / `vaultify_*_darwin_arm64` | macOS bare CLI binaries |
+            | `vaultify_*_darwin_amd64.app.tar.gz` / `*_darwin_arm64.app.tar.gz` | macOS `Vaultify.app` bundle (extracts to `Vaultify.app` with native dock/Finder icon) |
+            | `vaultify_*_linux_amd64` / `vaultify_*_linux_arm64` | Linux bare CLI binaries |
+            | `Vaultify.icns` | Standalone macOS icon (drop into your own bundle) |
+            | `vaultify_*_linux-icons.tar.gz` | Linux hicolor PNG set + `vaultify.desktop` template (extract under `~/.local/share/icons/` and `~/.local/share/applications/`) |
+            | `SHA256SUMS` | SHA-256 hashes for the binaries and `Vaultify.icns` |
             | `LICENSE` | MIT |
 
             ### Verify checksums
@@ -129,6 +176,7 @@ jobs:
             - 1Password integration requires the [1Password CLI](https://developer.1password.com/docs/cli) (`op`) where you use vault features.
           files: |
             dist/vaultify_*
+            dist/Vaultify.icns
             dist/SHA256SUMS
             dist/LICENSE
         env:

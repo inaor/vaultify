@@ -1,22 +1,27 @@
 package server
 
 import (
-	"bytes"
+	cryptoRand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/vaultify/vaultify/internal/buildinfo"
 	"github.com/vaultify/vaultify/internal/scanner"
 	"github.com/vaultify/vaultify/internal/session"
+	"github.com/vaultify/vaultify/internal/vault"
 )
 
 type veeChatContext struct {
@@ -33,19 +38,116 @@ type veeChatRequest struct {
 	Context   *veeChatContext `json:"context,omitempty"`
 }
 
+// veeProviderStatus is the wire shape for one Vee provider in
+// /api/vee/providers. Provenance fields let the UI distinguish
+// vault-sourced keys from user-pasted ones and show a
+// "validated 2 s ago" status without the user running a message.
 type veeProviderStatus struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	NeedsKey  bool   `json:"needs_key"`
-	HasKey    bool   `json:"has_key"`
-	Available bool   `json:"available"`
-	Model     string `json:"model"`
+	ID                     string `json:"id"`
+	Name                   string `json:"name"`
+	NeedsKey               bool   `json:"needs_key"`
+	HasKey                 bool   `json:"has_key"`
+	Available              bool   `json:"available"`
+	Model                  string `json:"model"`
+	KeySource              string `json:"key_source,omitempty"`       // "vault" | "user_entered" | "unknown"
+	VaultLocation          string `json:"vault_location,omitempty"`   // op://<vault>/<title>/credential
+	ModelSource            string `json:"model_source,omitempty"`     // "vault" | "default"
+	KeyLastValidatedAt     string `json:"key_last_validated_at,omitempty"`
+	KeyLastValidatedStatus string `json:"key_last_validated_status,omitempty"` // ok | unauthorized | rate_limited | network | never
+	VaultChecked           bool   `json:"vault_checked"`
 }
 
 type veeKeyRequest struct {
-	Provider string `json:"provider"`
-	Key      string `json:"key"`
-	Model    string `json:"model"`
+	Provider        string `json:"provider"`
+	Key             string `json:"key,omitempty"`
+	ValidationToken string `json:"validation_token,omitempty"`
+	Model           string `json:"model"`
+}
+
+// --- Validation token store (5-minute TTL) ---------------------------
+
+type veeValidationEntry struct {
+	Provider  string
+	Key       string // memory-only; never persisted
+	CreatedAt time.Time
+}
+
+type veeValidationStore struct {
+	mu      sync.Mutex
+	entries map[string]*veeValidationEntry
+}
+
+var veeValidations = &veeValidationStore{entries: make(map[string]*veeValidationEntry)}
+
+const veeValidationTTL = 5 * time.Minute
+
+func (s *veeValidationStore) put(provider, key string) string {
+	s.sweepLocked() // cheap, and stops the map growing unbounded
+	id := randomValidationToken()
+	s.mu.Lock()
+	s.entries[id] = &veeValidationEntry{Provider: provider, Key: key, CreatedAt: time.Now()}
+	s.mu.Unlock()
+	return id
+}
+
+func (s *veeValidationStore) consume(id string) (*veeValidationEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.entries[id]
+	if !ok {
+		return nil, false
+	}
+	delete(s.entries, id)
+	if time.Since(e.CreatedAt) > veeValidationTTL {
+		return nil, false
+	}
+	return e, true
+}
+
+func (s *veeValidationStore) sweepLocked() {
+	s.mu.Lock()
+	now := time.Now()
+	for id, e := range s.entries {
+		if now.Sub(e.CreatedAt) > veeValidationTTL {
+			delete(s.entries, id)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func randomValidationToken() string {
+	var b [12]byte
+	if _, err := cryptoRand.Read(b[:]); err != nil {
+		return fmt.Sprintf("vt-%d", time.Now().UnixNano())
+	}
+	return "vt-" + hex.EncodeToString(b[:])
+}
+
+// --- Per-provider last-validated cache (memory only) -----------------
+
+type veeValidationRecord struct {
+	At     time.Time
+	Status string // ok | unauthorized | rate_limited | network | never
+}
+
+var (
+	veeLastValidatedMu sync.Mutex
+	veeLastValidated   = map[string]veeValidationRecord{}
+)
+
+func setLastValidated(provider, status string) {
+	veeLastValidatedMu.Lock()
+	veeLastValidated[provider] = veeValidationRecord{At: time.Now(), Status: status}
+	veeLastValidatedMu.Unlock()
+}
+
+func getLastValidated(provider string) veeValidationRecord {
+	veeLastValidatedMu.Lock()
+	defer veeLastValidatedMu.Unlock()
+	if r, ok := veeLastValidated[provider]; ok {
+		return r
+	}
+	return veeValidationRecord{}
 }
 
 const veeSystemPromptTemplate = `You are Vee, Vaultify's security assistant. You speak British English, are concise, professional, and approachable.
@@ -235,49 +337,106 @@ func (srv *Server) handleVeeChat(w http.ResponseWriter, r *http.Request) {
 		systemPrompt = veeNoScanPrompt
 	}
 
-	provider := req.Provider
-	if provider == "" {
-		provider = "openai"
+	providerID := req.Provider
+	if providerID == "" {
+		providerID = "openai"
 	}
-
-	apiKey := srv.getVeeKey(provider)
-	if apiKey == "" && provider != "ollama" {
-		httpError(w, http.StatusBadRequest, "No API key found for %s. Store it in your Vaultify vault first.", provider)
+	provider := ProviderByID(providerID)
+	if provider == nil {
+		httpError(w, http.StatusBadRequest, "unknown provider: %s", providerID)
 		return
 	}
 
+	apiKey := srv.getVeeKey(providerID)
+	if apiKey == "" && providerID != "ollama" {
+		httpError(w, http.StatusBadRequest, "No API key found for %s. Store it in your Vaultify vault first.", providerID)
+		return
+	}
+
+	// Response is a plain-text stream of raw deltas (no SSE framing on
+	// the Vaultify↔browser hop). The browser reads with a ReadableStream
+	// reader and appends as chunks arrive.
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	flusher, canFlush := w.(http.Flusher)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
 
-	var responseText string
-	var callErr error
+	// Resolve the model the request will actually run on so we can both
+	// pass it down to the provider AND tell Vee about it. Without this
+	// extra system-prompt line the LLM has no way to answer "which
+	// model are you?" with anything more specific than "GPT" / "Claude"
+	// — the user just hit that on a real chat.
+	storedModel := srv.getVeeModel(providerID)
+	resolvedModel := storedModel
+	if resolvedModel == "" || resolvedModel == "default" {
+		resolvedModel = provider.DefaultModel()
+	}
+	systemPrompt = fmt.Sprintf(
+		"You are running on the %q model via the %s provider. "+
+			"If the user asks which model or which AI you are, give them this exact identifier.\n\n%s",
+		resolvedModel, providerID, systemPrompt,
+	)
 
-	model := srv.getVeeModel(provider)
-	switch provider {
-	case "openai":
-		if model == "" || model == "default" { model = "gpt-4.1-mini" }
-		responseText, callErr = callOpenAI(apiKey, model, systemPrompt, req.Message, w, flusher, canFlush)
-	case "anthropic":
-		if model == "" || model == "default" { model = "claude-3-5-haiku-20241022" }
-		responseText, callErr = callAnthropic(apiKey, model, systemPrompt, req.Message, w, flusher, canFlush)
-	case "gemini":
-		if model == "" || model == "default" { model = "gemini-2.0-flash" }
-		responseText, callErr = callGemini(apiKey, model, systemPrompt, req.Message, w, flusher, canFlush)
-	case "ollama":
-		if model == "" || model == "default" { model = "llama3.2" }
-		responseText, callErr = callOllama(model, systemPrompt, req.Message, w, flusher, canFlush)
-	default:
-		httpError(w, http.StatusBadRequest, "unknown provider: %s", provider)
+	in := ChatInput{
+		Model:        storedModel,
+		Key:          apiKey,
+		SystemPrompt: systemPrompt,
+		UserMessage:  req.Message,
+	}
+	srv.addAuditEntry("vee.chat.started", fmt.Sprintf("provider=%s model=%s", providerID, resolvedModel))
+
+	text, perr := provider.Chat(r.Context(), in, w)
+	if perr != nil {
+		veeLog().Warn("chat.error",
+			slog.String("provider", perr.Provider),
+			slog.Int("status", perr.Status),
+			slog.String("category", string(perr.Category)),
+			slog.String("message", truncateStr(perr.Message, 400)),
+		)
+		srv.addAuditEntry("vee.chat.failed", fmt.Sprintf("provider=%s category=%s status=%d", perr.Provider, perr.Category, perr.Status))
+		if text == "" {
+			// Nothing streamed yet → the client body is empty, safe to
+			// surface a user-facing prefix instead of a silent failure.
+			_, _ = io.WriteString(w, "[Error: "+describeProviderError(perr)+"]")
+		} else {
+			_, _ = io.WriteString(w, "\n\n[Interrupted: "+describeProviderError(perr)+"]")
+		}
 		return
 	}
+	srv.addAuditEntry("vee.chat.completed", fmt.Sprintf("provider=%s bytes=%d", providerID, len(text)))
+}
 
-	if callErr != nil {
-		if responseText == "" {
-			w.Write([]byte("\n\n[Error: " + callErr.Error() + "]"))
-		}
+// describeProviderError renders a short user-facing string. Full detail
+// still goes to the Logs tab via the slog record.
+func describeProviderError(p *ProviderError) string {
+	if p == nil {
+		return "unknown error"
 	}
-	_ = responseText
+	switch p.Category {
+	case ErrAuth:
+		return "provider rejected the API key (401/403). Check the stored key in Vee settings."
+	case ErrRateLimit:
+		return "provider rate limit hit (429). Try again in a few seconds."
+	case ErrQuota:
+		return "provider quota exhausted. Check your plan or billing."
+	case ErrNetwork:
+		return "could not reach provider. Check your internet connection."
+	case ErrBadInput:
+		return "provider rejected the request. Model or schema mismatch — see Logs tab."
+	case ErrProviderUp:
+		return "provider is currently having issues (5xx)."
+	}
+	if p.Message != "" {
+		return truncateStr(p.Message, 180)
+	}
+	return "unknown error"
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
@@ -288,23 +447,128 @@ func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 		{ID: "ollama", Name: "Ollama", NeedsKey: false},
 	}
 
+	vaultName := srv.getVeeVaultName()
 	checkVault := r.URL.Query().Get("check") == "1"
-	for i := range providers {
-		if providers[i].NeedsKey {
-			if checkVault {
-				key := srv.getVeeKey(providers[i].ID)
-				providers[i].HasKey = key != ""
-				providers[i].Available = providers[i].HasKey
-				if providers[i].HasKey {
-					providers[i].Model = srv.getVeeModel(providers[i].ID)
+	attemptedCheck := false
+	if checkVault && srv.activeBackend().SupportsVeeCredentialStore() {
+		if opPath, err := exec.LookPath("op"); err == nil {
+			attemptedCheck = true
+			slots := vault.VeeProviderKeyScan(opPath, vaultName)
+			for i := range providers {
+				if !providers[i].NeedsKey {
+					continue
+				}
+				if s, ok := slots[providers[i].ID]; ok {
+					providers[i].HasKey = s.HasKey
+					providers[i].Available = s.HasKey
+					providers[i].Model = s.Model
+					if s.HasKey {
+						providers[i].KeySource = "vault"
+						providers[i].VaultLocation = fmt.Sprintf("op://%s/vee-%s-key/credential", vaultName, providers[i].ID)
+						if s.Model != "" && s.Model != "default" {
+							providers[i].ModelSource = "vault"
+						}
+					}
 				}
 			}
-		} else {
+		}
+	}
+	for i := range providers {
+		providers[i].VaultChecked = attemptedCheck
+		if providers[i].NeedsKey && providers[i].HasKey && providers[i].KeySource == "" {
+			providers[i].KeySource = "unknown"
+		}
+		rec := getLastValidated(providers[i].ID)
+		if !rec.At.IsZero() {
+			providers[i].KeyLastValidatedAt = rec.At.UTC().Format(time.RFC3339)
+			providers[i].KeyLastValidatedStatus = rec.Status
+		} else if providers[i].HasKey {
+			providers[i].KeyLastValidatedStatus = "never"
+		}
+		if !providers[i].NeedsKey {
 			providers[i].Available = isOllamaRunning()
 		}
 	}
 
 	writeJSON(w, http.StatusOK, providers)
+}
+
+// validateProviderKey runs the provider-specific probe and returns the
+// list of usable models plus a high-level reason category. Shared
+// between "paste a new key" and "validate the key already stored in
+// the vault" flows so both surfaces report the same errors.
+func validateProviderKey(provider, key string) (models []string, reason string) {
+	switch provider {
+	case "openai":
+		httpReq, _ := http.NewRequest("GET", "https://api.openai.com/v1/models", nil)
+		httpReq.Header.Set("Authorization", "Bearer "+key)
+		client := &http.Client{Timeout: 8 * time.Second}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			return nil, "network"
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return nil, "unauthorized"
+		}
+		if resp.StatusCode == 429 {
+			return nil, "rate_limited"
+		}
+		if resp.StatusCode != 200 {
+			return nil, "unknown"
+		}
+		var result struct {
+			Data []struct{ ID string `json:"id"` } `json:"data"`
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = json.Unmarshal(body, &result)
+		for _, m := range result.Data {
+			if strings.Contains(m.ID, "gpt") {
+				models = append(models, m.ID)
+			}
+		}
+		sort.Strings(models)
+		if len(models) == 0 {
+			return nil, "no_models"
+		}
+		return models, "ok"
+	case "anthropic":
+		// Anthropic has no public list endpoint; accept at face value
+		// when the key shape is non-empty. Real validation happens on
+		// first chat. Reason "ok" is returned so the UI can move on.
+		if strings.TrimSpace(key) == "" {
+			return nil, "unauthorized"
+		}
+		return []string{"claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"}, "ok"
+	case "gemini":
+		if strings.TrimSpace(key) == "" {
+			return nil, "unauthorized"
+		}
+		return []string{"gemini-2.0-flash", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-preview-05-06"}, "ok"
+	case "ollama":
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get("http://localhost:11434/api/tags")
+		if err != nil {
+			return nil, "network"
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return nil, "unknown"
+		}
+		var result struct {
+			Models []struct{ Name string `json:"name"` } `json:"models"`
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = json.Unmarshal(body, &result)
+		for _, m := range result.Models {
+			models = append(models, m.Name)
+		}
+		if len(models) == 0 {
+			return nil, "no_models"
+		}
+		return models, "ok"
+	}
+	return nil, "unknown_provider"
 }
 
 func (srv *Server) handleVeeModels(w http.ResponseWriter, r *http.Request) {
@@ -320,51 +584,67 @@ func (srv *Server) handleVeeModels(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
 		return
 	}
+	srv.addAuditEntry("vee.key.validate_started", fmt.Sprintf("provider=%s", req.Provider))
 
-	var models []string
-	switch req.Provider {
-	case "openai":
-		httpReq, _ := http.NewRequest("GET", "https://api.openai.com/v1/models", nil)
-		httpReq.Header.Set("Authorization", "Bearer "+req.Key)
-		resp, err := http.DefaultClient.Do(httpReq)
-		if err != nil || resp.StatusCode != 200 {
-			httpError(w, http.StatusBadRequest, "Invalid API key or cannot reach OpenAI")
+	models, reason := validateProviderKey(req.Provider, req.Key)
+	if reason != "ok" {
+		srv.addAuditEntry("vee.key.validate_failed", fmt.Sprintf("provider=%s reason=%s", req.Provider, reason))
+		// Keep legacy shape so the existing client keeps working.
+		writeJSON(w, http.StatusOK, map[string]any{"valid": false, "models": []string{}, "reason": reason})
+		return
+	}
+
+	// Issue a short-lived token so the browser never has to hold the
+	// pasted key between "validate" and "store". Survives a paused tab.
+	token := veeValidations.put(req.Provider, req.Key)
+	srv.addAuditEntry("vee.key.validated", fmt.Sprintf("provider=%s model_count=%d", req.Provider, len(models)))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"valid":            true,
+		"models":           models,
+		"validation_token": token,
+		"reason":           "ok",
+	})
+}
+
+// handleVeeValidateStoredKey probes the provider with the key already
+// stored in the configured Vee vault, updates the last-validated cache,
+// and returns the status so the UI can show a green/red dot without
+// sending a chat message.
+func (srv *Server) handleVeeValidateStoredKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if err := readRequestJSON(r, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge, "request body too large")
 			return
 		}
-		defer resp.Body.Close()
-		var result struct {
-			Data []struct{ ID string `json:"id"` } `json:"data"`
-		}
-		body, _ := io.ReadAll(resp.Body)
-		json.Unmarshal(body, &result)
-		for _, m := range result.Data {
-			if strings.Contains(m.ID, "gpt") {
-				models = append(models, m.ID)
-			}
-		}
-		sort.Strings(models)
-	case "anthropic":
-		models = []string{"claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"}
-	case "gemini":
-		models = []string{"gemini-2.0-flash", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-preview-05-06"}
-	case "ollama":
-		resp, err := http.Get("http://localhost:11434/api/tags")
-		if err == nil && resp.StatusCode == 200 {
-			defer resp.Body.Close()
-			var result struct {
-				Models []struct{ Name string `json:"name"` } `json:"models"`
-			}
-			body, _ := io.ReadAll(resp.Body)
-			json.Unmarshal(body, &result)
-			for _, m := range result.Models {
-				models = append(models, m.Name)
-			}
-		}
+		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
+		return
 	}
-	if models == nil {
-		models = []string{}
+	if req.Provider == "" {
+		httpError(w, http.StatusBadRequest, "provider is required")
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": len(models) > 0, "models": models})
+	key := srv.getVeeKey(req.Provider)
+	if key == "" {
+		setLastValidated(req.Provider, "never")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"provider": req.Provider,
+			"status":   "no_key",
+			"reason":   "no stored key in vault",
+		})
+		return
+	}
+	_, reason := validateProviderKey(req.Provider, key)
+	setLastValidated(req.Provider, reason)
+	srv.addAuditEntry("vee.key.stored_validated", fmt.Sprintf("provider=%s status=%s", req.Provider, reason))
+	rec := getLastValidated(req.Provider)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   req.Provider,
+		"status":     reason,
+		"checked_at": rec.At.UTC().Format(time.RFC3339),
+	})
 }
 
 func (srv *Server) handleVeeStoreKey(w http.ResponseWriter, r *http.Request) {
@@ -377,35 +657,116 @@ func (srv *Server) handleVeeStoreKey(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
 		return
 	}
-	if req.Provider == "" || req.Key == "" {
-		httpError(w, http.StatusBadRequest, "provider and key required")
+	if req.Provider == "" {
+		httpError(w, http.StatusBadRequest, "provider is required")
 		return
 	}
 
-	opPath, err := exec.LookPath("op")
-	if err != nil {
-		httpError(w, http.StatusBadRequest, "1Password CLI not found")
+	// Token flow preferred; legacy key-in-body still accepted.
+	var key string
+	var source string
+	if req.ValidationToken != "" {
+		entry, ok := veeValidations.consume(req.ValidationToken)
+		if !ok {
+			httpError(w, http.StatusBadRequest, "validation token expired or already used — paste the key again")
+			return
+		}
+		if entry.Provider != req.Provider {
+			httpError(w, http.StatusBadRequest, "validation token does not match provider")
+			return
+		}
+		key = entry.Key
+		source = "user_entered"
+	} else if req.Key != "" {
+		key = req.Key
+		source = "user_entered"
+	} else {
+		httpError(w, http.StatusBadRequest, "provide either key or validation_token")
 		return
 	}
 
-	ensureVaultExists("Vaultify")
-	title := fmt.Sprintf("vee-%s-key", req.Provider)
+	b := srv.activeBackend()
+	if !b.SupportsVeeCredentialStore() {
+		httpError(w, http.StatusBadRequest, "Storing Vee API keys requires 1Password as the active vault in the sidebar.")
+		return
+	}
 	model := req.Model
 	if model == "" {
 		model = "default"
 	}
-	cmd := exec.Command(opPath, "item", "create", "--vault", "Vaultify", "--category", "API Credential", "--title", title, "credential="+req.Key, "username="+model)
-	out, err := cmd.CombinedOutput()
+	vaultName := srv.getVeeVaultName()
+	stored, changed, err := b.StoreVeeProviderKey(vaultName, req.Provider, key, model)
 	if err != nil {
-		existing := exec.Command(opPath, "item", "edit", title, "--vault", "Vaultify", "credential="+req.Key, "username="+model)
-		out2, err2 := existing.CombinedOutput()
-		if err2 != nil {
-			log.Printf("vee store key: create err=%v out=%s edit err=%v out2=%s", err, strings.TrimSpace(string(out)), err2, strings.TrimSpace(string(out2)))
-			httpError(w, http.StatusInternalServerError, "failed to store key in vault")
+		log.Printf("vee store key: %v", err)
+		srv.addAuditEntry("vee.key.store_failed", fmt.Sprintf("provider=%s vault=%s err=%v", req.Provider, vaultName, err))
+		httpError(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	srv.addAuditEntry("vee.key.stored", fmt.Sprintf("provider=%s vault=%s source=%s changed=%v model=%s", req.Provider, vaultName, source, changed, model))
+	// Freshly stored key is known-good: mark last-validated so the card
+	// lights green immediately without a second probe.
+	setLastValidated(req.Provider, "ok")
+	// Drop any in-memory cache for this provider so the next op read
+	// picks up the value the user just wrote (otherwise a recently-
+	// cached old key would shadow the rotation for up to veeKeyCacheTTL).
+	srv.veeCacheInvalidate(req.Provider)
+	// And prime the cache with the value we already have in hand —
+	// this avoids a fresh op read (and another Windows Hello prompt)
+	// on the very next chat message.
+	srv.veeCachePutKey(req.Provider, vaultName, key)
+	if model != "" {
+		srv.veeCachePutModel(req.Provider, vaultName, model)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stored":         stored,
+		"changed":        changed,
+		"model":          model,
+		"vault":          vaultName,
+		"vault_location": fmt.Sprintf("op://%s/vee-%s-key/credential", vaultName, req.Provider),
+	})
+}
+
+// handleVeeSettingsGet returns Vee-facing settings the UI needs to
+// render provenance hints and the vault picker.
+func (srv *Server) handleVeeSettingsGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"vee_vault_name":     srv.getVeeVaultName(),
+		"default_vault_name": vault.DefaultVeeVaultName,
+	})
+}
+
+// handleVeeSettingsPost accepts a new vault name. Blank resets to the
+// default ("Vaultify"); any non-empty value is stored verbatim so the
+// user can keep keys in "Personal" or a dedicated vault.
+func (srv *Server) handleVeeSettingsPost(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		VeeVaultName string `json:"vee_vault_name"`
+	}
+	if err := readRequestJSON(r, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge, "request body too large")
 			return
 		}
+		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"stored": true, "model": model})
+	name := strings.TrimSpace(req.VeeVaultName)
+	if err := srv.setVeeVaultName(name); err != nil {
+		httpError(w, http.StatusInternalServerError, "save settings: %v", err)
+		return
+	}
+	srv.addAuditEntry("vee.settings.vault_changed", fmt.Sprintf("vault=%s", srv.getVeeVaultName()))
+	// Drop any previous last-validated rows since they referenced the
+	// old vault's key.
+	veeLastValidatedMu.Lock()
+	veeLastValidated = map[string]veeValidationRecord{}
+	veeLastValidatedMu.Unlock()
+	// Same reasoning as the validation cache — stored secrets in the
+	// per-server cache were keyed against the old vault. The cache
+	// already self-checks the vault name, but explicit invalidation
+	// keeps memory tidy.
+	srv.veeCacheInvalidateAll()
+	writeJSON(w, http.StatusOK, map[string]any{"vee_vault_name": srv.getVeeVaultName()})
 }
 
 func isOllamaRunning() bool {
@@ -418,304 +779,134 @@ func isOllamaRunning() bool {
 	return resp.StatusCode == 200
 }
 
+// --- Vee key/model cache --------------------------------------------
+//
+// Every `op read op://...` is a child process that, on Windows with
+// "always require unlock" set, can pop a Windows Hello / 1Password
+// authorize prompt — even when a session has just been authorized for
+// a sibling secret. Without this cache, a single chat message paid for
+// two op reads (credential + username/model), and the validate-stored-
+// key burst paid for 2 × N providers in parallel — three providers
+// times two reads = up to six popups for a single panel open. Caching
+// the (key, model) pair for 5 minutes collapses everything past the
+// first read into in-memory hits, which is what the user expected
+// from "Vaultify is already connected to 1Password".
+//
+// Cache is invalidated when:
+//   - the user stores a new key (StoreVeeProviderKey)
+//   - the user changes the Vee vault name in settings
+//   - the user signs out of 1Password (vault auth cache invalidate)
+
+const veeKeyCacheTTL = 5 * time.Minute
+
+type veeCachedSecret struct {
+	key   string
+	model string
+	at    time.Time
+	vault string // tracked so a vault rename mid-TTL invalidates correctly
+}
+
+func (srv *Server) veeCacheGet(provider, vaultName string) (key, model string, ok bool) {
+	srv.veeKeyCacheMu.Lock()
+	defer srv.veeKeyCacheMu.Unlock()
+	e, found := srv.veeKeyCache[provider]
+	if !found {
+		return "", "", false
+	}
+	if e.vault != vaultName {
+		return "", "", false
+	}
+	if time.Since(e.at) >= veeKeyCacheTTL {
+		return "", "", false
+	}
+	return e.key, e.model, true
+}
+
+func (srv *Server) veeCachePutKey(provider, vaultName, key string) {
+	srv.veeKeyCacheMu.Lock()
+	defer srv.veeKeyCacheMu.Unlock()
+	if srv.veeKeyCache == nil {
+		srv.veeKeyCache = map[string]veeCachedSecret{}
+	}
+	prev := srv.veeKeyCache[provider]
+	if prev.vault != vaultName {
+		prev = veeCachedSecret{}
+	}
+	srv.veeKeyCache[provider] = veeCachedSecret{
+		key:   key,
+		model: prev.model,
+		at:    time.Now(),
+		vault: vaultName,
+	}
+}
+
+func (srv *Server) veeCachePutModel(provider, vaultName, model string) {
+	srv.veeKeyCacheMu.Lock()
+	defer srv.veeKeyCacheMu.Unlock()
+	if srv.veeKeyCache == nil {
+		srv.veeKeyCache = map[string]veeCachedSecret{}
+	}
+	prev := srv.veeKeyCache[provider]
+	if prev.vault != vaultName {
+		prev = veeCachedSecret{}
+	}
+	srv.veeKeyCache[provider] = veeCachedSecret{
+		key:   prev.key,
+		model: model,
+		at:    time.Now(),
+		vault: vaultName,
+	}
+}
+
+// veeCacheInvalidate forgets the cached secret for one provider so the
+// next read goes to the vault. Called whenever the user stores a new
+// key for that provider.
+func (srv *Server) veeCacheInvalidate(provider string) {
+	srv.veeKeyCacheMu.Lock()
+	defer srv.veeKeyCacheMu.Unlock()
+	delete(srv.veeKeyCache, provider)
+}
+
+// veeCacheInvalidateAll forgets every cached Vee secret. Called when
+// the Vee vault name changes (so every cached entry is now wrong) and
+// from sign-out flows.
+func (srv *Server) veeCacheInvalidateAll() {
+	srv.veeKeyCacheMu.Lock()
+	defer srv.veeKeyCacheMu.Unlock()
+	srv.veeKeyCache = map[string]veeCachedSecret{}
+}
+
 func (srv *Server) getVeeKey(provider string) string {
-	opPath, err := exec.LookPath("op")
-	if err != nil {
+	vaultName := srv.getVeeVaultName()
+	if k, _, ok := srv.veeCacheGet(provider, vaultName); ok && k != "" {
+		return k
+	}
+	ref := fmt.Sprintf("op://%s/vee-%s-key/credential", vaultName, provider)
+	v, err := srv.activeBackend().ReadSecret(ref)
+	if err != nil || v == "" {
+		srv.addAuditEntry("vee.key.read_failed", fmt.Sprintf("provider=%s ref=%s err=%v", provider, ref, err))
 		return ""
 	}
-	ref := fmt.Sprintf("op://Vaultify/vee-%s-key/credential", provider)
-	cmd := exec.Command(opPath, "read", ref)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	srv.veeCachePutKey(provider, vaultName, v)
+	return v
 }
 
 func (srv *Server) getVeeModel(provider string) string {
-	opPath, err := exec.LookPath("op")
-	if err != nil {
+	vaultName := srv.getVeeVaultName()
+	if _, m, ok := srv.veeCacheGet(provider, vaultName); ok && m != "" {
+		return m
+	}
+	ref := fmt.Sprintf("op://%s/vee-%s-key/username", vaultName, provider)
+	v, err := srv.activeBackend().ReadSecret(ref)
+	if err != nil || v == "" {
 		return ""
 	}
-	ref := fmt.Sprintf("op://Vaultify/vee-%s-key/username", provider)
-	cmd := exec.Command(opPath, "read", ref)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	srv.veeCachePutModel(provider, vaultName, v)
+	return v
 }
 
-// --- LLM Provider Implementations ---
-
-func callOpenAI(apiKey, model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
-	body := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userMessage},
-		},
-		"stream": false,
-	}
-	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(data))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("OpenAI request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("OpenAI error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	json.Unmarshal(respBody, &result)
-	if len(result.Choices) > 0 {
-		text := result.Choices[0].Message.Content
-		w.Write([]byte(text))
-		if canFlush {
-			flusher.Flush()
-		}
-		return text, nil
-	}
-	return "", fmt.Errorf("no response from OpenAI")
-}
-
-func callAnthropic(apiKey, model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
-	body := map[string]any{
-		"model":      model,
-		"max_tokens": 2048,
-		"system":     systemPrompt,
-		"messages":   []map[string]string{{"role": "user", "content": userMessage}},
-	}
-	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(data))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Anthropic request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Anthropic error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	json.Unmarshal(respBody, &result)
-	if len(result.Content) > 0 {
-		text := result.Content[0].Text
-		w.Write([]byte(text))
-		if canFlush {
-			flusher.Flush()
-		}
-		return text, nil
-	}
-	return "", fmt.Errorf("no response from Anthropic")
-}
-
-func callGemini(apiKey, model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
-	body := map[string]any{
-		"system_instruction": map[string]any{"parts": []map[string]string{{"text": systemPrompt}}},
-		"contents":           []map[string]any{{"parts": []map[string]string{{"text": userMessage}}}},
-	}
-	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(data))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Gemini request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Gemini error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-	json.Unmarshal(respBody, &result)
-	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
-		text := result.Candidates[0].Content.Parts[0].Text
-		w.Write([]byte(text))
-		if canFlush {
-			flusher.Flush()
-		}
-		return text, nil
-	}
-	return "", fmt.Errorf("no response from Gemini")
-}
-
-// --- Non-streaming LLM calls (for FP finder etc.) ---
-
-func openaiGenerateBlock(apiKey, model, systemPrompt, userMessage string) (string, error) {
-	if model == "" || model == "default" {
-		model = "gpt-4.1-mini"
-	}
-	body := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userMessage},
-		},
-		"stream": false,
-	}
-	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(data))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("OpenAI error %d: %s", resp.StatusCode, string(respBody))
-	}
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	json.Unmarshal(respBody, &result)
-	if len(result.Choices) > 0 {
-		return result.Choices[0].Message.Content, nil
-	}
-	return "", fmt.Errorf("no response from OpenAI")
-}
-
-func anthropicGenerateBlock(apiKey, model, systemPrompt, userMessage string) (string, error) {
-	if model == "" || model == "default" {
-		model = "claude-3-5-haiku-20241022"
-	}
-	body := map[string]any{
-		"model":      model,
-		"max_tokens": 2048,
-		"system":     systemPrompt,
-		"messages":   []map[string]string{{"role": "user", "content": userMessage}},
-	}
-	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(data))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Anthropic error %d: %s", resp.StatusCode, string(respBody))
-	}
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	json.Unmarshal(respBody, &result)
-	if len(result.Content) > 0 {
-		return result.Content[0].Text, nil
-	}
-	return "", fmt.Errorf("no response from Anthropic")
-}
-
-func geminiGenerateBlock(apiKey, model, systemPrompt, userMessage string) (string, error) {
-	if model == "" || model == "default" {
-		model = "gemini-2.0-flash"
-	}
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
-	body := map[string]any{
-		"system_instruction": map[string]any{"parts": []map[string]string{{"text": systemPrompt}}},
-		"contents":           []map[string]any{{"parts": []map[string]string{{"text": userMessage}}}},
-	}
-	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(data))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", apiKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Gemini error %d: %s", resp.StatusCode, string(respBody))
-	}
-	var result struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-	json.Unmarshal(respBody, &result)
-	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
-		return result.Candidates[0].Content.Parts[0].Text, nil
-	}
-	return "", fmt.Errorf("no response from Gemini")
-}
-
-func ollamaGenerateBlock(model, systemPrompt, userMessage string) (string, error) {
-	if model == "" || model == "default" {
-		model = "llama3.2"
-	}
-	body := map[string]any{
-		"model":  model,
-		"prompt": systemPrompt + "\n\nUser: " + userMessage + "\n\nAssistant (JSON only):",
-		"stream": false,
-	}
-	data, _ := json.Marshal(body)
-	resp, err := http.Post("http://localhost:11434/api/generate", "application/json", bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	var result struct {
-		Response string `json:"response"`
-	}
-	json.Unmarshal(respBody, &result)
-	if result.Response != "" {
-		return result.Response, nil
-	}
-	return "", fmt.Errorf("no response from Ollama")
-}
+// Provider-specific HTTP code lives in vee_providers.go. Everything
+// below this point is Vee-adjacent helpers.
 
 func stripJSONFence(s string) string {
 	s = strings.TrimSpace(s)
@@ -744,6 +935,10 @@ type veeFpFinderResponse struct {
 func (srv *Server) handleVeeFpFinder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !buildinfo.IsPro() {
+		httpError(w, http.StatusForbidden, "Vee FP Finder is a Vaultify Pro feature.")
 		return
 	}
 	var req veeFpFinderRequest
@@ -834,42 +1029,39 @@ Shape: {"likely_false_positive_hashes":["64-char hex sha256..."],"reasoning":"br
 
 	user := fmt.Sprintf("Findings metadata (unique by match hash):\n%s\n\nReturn JSON listing match_sha256 values (field h) that are likely false positives.", string(payload))
 
-	provider := req.Provider
-	if provider == "" {
-		provider = "gemini"
+	providerID := req.Provider
+	if providerID == "" {
+		providerID = "gemini"
 	}
-	model := srv.getVeeModel(provider)
-	apiKey := srv.getVeeKey(provider)
-
-	var text string
-	var callErr error
-	switch provider {
-	case "openai":
-		if apiKey == "" {
-			httpError(w, http.StatusBadRequest, "No OpenAI API key in vault (vee-openai-key)")
-			return
-		}
-		text, callErr = openaiGenerateBlock(apiKey, model, system, user)
-	case "anthropic":
-		if apiKey == "" {
-			httpError(w, http.StatusBadRequest, "No Anthropic API key in vault")
-			return
-		}
-		text, callErr = anthropicGenerateBlock(apiKey, model, system, user)
-	case "gemini":
-		if apiKey == "" {
-			httpError(w, http.StatusBadRequest, "No Gemini API key in vault")
-			return
-		}
-		text, callErr = geminiGenerateBlock(apiKey, model, system, user)
-	case "ollama":
-		text, callErr = ollamaGenerateBlock(model, system, user)
-	default:
-		httpError(w, http.StatusBadRequest, "unknown provider: %s", provider)
+	provider := ProviderByID(providerID)
+	if provider == nil {
+		httpError(w, http.StatusBadRequest, "unknown provider: %s", providerID)
 		return
 	}
-	if callErr != nil {
-		httpError(w, http.StatusInternalServerError, "LLM: %v", callErr)
+	apiKey := srv.getVeeKey(providerID)
+	if apiKey == "" && providerID != "ollama" {
+		httpError(w, http.StatusBadRequest, "No %s API key in the configured Vee vault.", providerID)
+		return
+	}
+
+	in := ChatInput{
+		Model:        srv.getVeeModel(providerID),
+		Key:          apiKey,
+		SystemPrompt: system,
+		UserMessage:  user,
+	}
+	// Use the non-streaming path: FP Finder needs the whole JSON blob
+	// before it can parse. Context comes from the HTTP request so
+	// cancelling the client aborts the upstream LLM call.
+	text, perr := provider.Generate(r.Context(), in)
+	if perr != nil {
+		veeLog().Warn("fp_finder.error",
+			slog.String("provider", perr.Provider),
+			slog.Int("status", perr.Status),
+			slog.String("category", string(perr.Category)),
+			slog.String("message", truncateStr(perr.Message, 400)),
+		)
+		httpError(w, http.StatusBadGateway, "LLM %s (%s): %s", providerID, perr.Category, describeProviderError(perr))
 		return
 	}
 	text = stripJSONFence(text)
@@ -895,34 +1087,6 @@ Shape: {"likely_false_positive_hashes":["64-char hex sha256..."],"reasoning":"br
 	}
 	out.LikelyFalsePositiveHashes = filtered
 	writeJSON(w, http.StatusOK, out)
-}
-
-func callOllama(model, systemPrompt, userMessage string, w http.ResponseWriter, flusher http.Flusher, canFlush bool) (string, error) {
-	body := map[string]any{
-		"model":  model,
-		"prompt": systemPrompt + "\n\nUser: " + userMessage + "\n\nVee:",
-		"stream": false,
-	}
-	data, _ := json.Marshal(body)
-	resp, err := http.Post("http://localhost:11434/api/generate", "application/json", bytes.NewReader(data))
-	if err != nil {
-		return "", fmt.Errorf("Ollama not reachable: %v", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	var result struct {
-		Response string `json:"response"`
-	}
-	json.Unmarshal(respBody, &result)
-	if result.Response != "" {
-		w.Write([]byte(result.Response))
-		if canFlush {
-			flusher.Flush()
-		}
-		return result.Response, nil
-	}
-	return "", fmt.Errorf("no response from Ollama")
 }
 
 func init() {

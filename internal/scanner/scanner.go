@@ -1,4 +1,4 @@
-﻿package scanner
+package scanner
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type Finding struct {
@@ -29,6 +30,13 @@ type Finding struct {
 	DetectionLayer  string  `json:"detection_layer,omitempty"`
 	ContextKey      string  `json:"context_key,omitempty"`
 	Confidence      float64 `json:"confidence"`
+
+	// Validation Slice A — heuristic classification + validator id.
+	// Set by the server in onFinding via internal/validation.Classify
+	// before the Finding lands in state/storage. Empty on findings
+	// produced by older binaries; UI treats empty as NOT_CHECKED.
+	HeuristicStatus string `json:"heuristic_status,omitempty"`
+	ValidatorID     string `json:"validator_id,omitempty"`
 }
 
 // Confidence represents how likely a match is a real secret.
@@ -65,14 +73,14 @@ func shannonEntropy(s string) float64 {
 // (ghp_, AKIA, sk-proj-) are inherently high-confidence so their
 // entropy threshold is lower. Generic patterns need higher entropy.
 var minEntropy = map[string]float64{
-	"telegram_bot":   3.5,
-	"jwt":            3.0,
-	"mailgun":        3.2,
-	"twilio":         3.0,
-	"twilio_auth":    3.0,
-	"databricks":     3.0,
-	"openai_legacy":  3.0,
-	"notion":         3.2,
+	"telegram_bot":  3.5,
+	"jwt":           3.0,
+	"mailgun":       3.2,
+	"twilio":        3.0,
+	"twilio_auth":   3.0,
+	"databricks":    3.0,
+	"openai_legacy": 3.0,
+	"notion":        3.2,
 }
 
 func minEntropyFor(patternID string) float64 {
@@ -469,7 +477,10 @@ var scanFilenames = map[string]bool{
 }
 
 type Scanner struct {
-	patterns []CompiledPattern
+	patterns     []CompiledPattern
+	maxScanFiles int           // 0 = unlimited; set per Scan call
+	enqueued     int32         // files queued for workers; atomic
+	capDone      atomic.Uint32 // 1: stop walking — avoids traversing the rest of the tree after the cap
 }
 
 func NewScanner() *Scanner {
@@ -481,20 +492,54 @@ type scanWork struct {
 	root string
 }
 
-func (s *Scanner) Scan(ctx context.Context, roots []string, onProgress ProgressFunc, onFinding FindingFunc) error {
+// Scan walks roots and invokes onFinding for each match. maxScanFiles 0 means no cap.
+// Returns filesScanned and capped true when the cap was reached (more eligible files may exist).
+//
+// Hot-path design (Phase 3):
+//   - Workers push findings into a buffered channel. A single dispatcher
+//     goroutine calls onFinding in order, so the callback no longer
+//     serialises workers through the caller's mutex and WebSocket write.
+//   - filesScanned is an atomic counter; no per-file mutex acquire.
+//   - The caller's onFinding is still invoked exactly once per finding
+//     and in the goroutine that owns the dispatcher — callers that want
+//     to be concurrency-safe should protect their own state as before.
+func (s *Scanner) Scan(ctx context.Context, roots []string, maxScanFiles int, onProgress ProgressFunc, onFinding FindingFunc) (filesScanned int, capped bool, err error) {
+	s.maxScanFiles = maxScanFiles
+	atomic.StoreInt32(&s.enqueued, 0)
+	s.capDone.Store(0)
+
 	ch := make(chan scanWork, 256)
 
 	go func() {
 		defer close(ch)
 		for _, root := range roots {
+			if ctx.Err() != nil {
+				return
+			}
 			s.walkDirChan(ctx, root, root, ch)
 		}
 	}()
 
-	var mu sync.Mutex
-	var scanned int
+	findingsCh := make(chan Finding, 256)
+	var dispatcherWG sync.WaitGroup
+	dispatcherWG.Add(1)
+	go func() {
+		defer dispatcherWG.Done()
+		for f := range findingsCh {
+			onFinding(f)
+		}
+	}()
+
+	var scanned atomic.Int64
 	sem := make(chan struct{}, 16)
 	var wg sync.WaitGroup
+
+	progressTotal := func(n int64) int {
+		if maxScanFiles > 0 {
+			return maxScanFiles
+		}
+		return int(n) + 100
+	}
 
 	for w := range ch {
 		if ctx.Err() != nil {
@@ -509,25 +554,41 @@ func (s *Scanner) Scan(ctx context.Context, roots []string, onProgress ProgressF
 				return
 			}
 			findings := s.scanFile(w.path, w.root)
-			mu.Lock()
-			scanned++
-			n := scanned
+			n := scanned.Add(1)
 			for _, f := range findings {
-				onFinding(f)
+				findingsCh <- f
 			}
-			mu.Unlock()
-			if n%20 == 0 {
-				onProgress(n, n+100, w.path)
+			report := n%20 == 0
+			if maxScanFiles > 0 {
+				report = n%10 == 0 || n == int64(maxScanFiles)
+			}
+			if report {
+				onProgress(int(n), progressTotal(n), w.path)
 			}
 		}(w)
 	}
 	wg.Wait()
-	onProgress(scanned, scanned, "")
-	return nil
+	close(findingsCh)
+	dispatcherWG.Wait()
+
+	n := scanned.Load()
+	finalTotal := int(n)
+	if maxScanFiles > 0 {
+		finalTotal = maxScanFiles
+	}
+	onProgress(int(n), finalTotal, "")
+	capped = maxScanFiles > 0 && int(atomic.LoadInt32(&s.enqueued)) >= maxScanFiles
+	return int(n), capped, nil
 }
 
 func (s *Scanner) walkDirChan(ctx context.Context, root, dir string, ch chan<- scanWork) {
 	if ctx.Err() != nil {
+		return
+	}
+	if s.maxScanFiles > 0 && s.capDone.Load() != 0 {
+		return
+	}
+	if s.maxScanFiles > 0 && int(atomic.LoadInt32(&s.enqueued)) >= s.maxScanFiles {
 		return
 	}
 	entries, err := os.ReadDir(dir)
@@ -536,6 +597,12 @@ func (s *Scanner) walkDirChan(ctx context.Context, root, dir string, ch chan<- s
 	}
 	for _, e := range entries {
 		if ctx.Err() != nil {
+			return
+		}
+		if s.maxScanFiles > 0 && s.capDone.Load() != 0 {
+			return
+		}
+		if s.maxScanFiles > 0 && int(atomic.LoadInt32(&s.enqueued)) >= s.maxScanFiles {
 			return
 		}
 		name := e.Name()
@@ -554,11 +621,19 @@ func (s *Scanner) walkDirChan(ctx context.Context, root, dir string, ch chan<- s
 			if err != nil || info.Size() > 5*1024*1024 {
 				continue
 			}
+			if s.maxScanFiles > 0 {
+				if int(atomic.LoadInt32(&s.enqueued)) >= s.maxScanFiles {
+					return
+				}
+				atomic.AddInt32(&s.enqueued, 1)
+				if int(atomic.LoadInt32(&s.enqueued)) >= s.maxScanFiles {
+					s.capDone.Store(1)
+				}
+			}
 			ch <- scanWork{full, root}
 		}
 	}
 }
-
 
 func (s *Scanner) scanFile(fp, root string) []Finding {
 	data, err := os.ReadFile(fp)
@@ -740,11 +815,9 @@ func RecoverPlaintext(f Finding) string {
 	line := strings.TrimSuffix(lines[f.LineNumber-1], "\r")
 	want := f.MatchSHA256
 
-	patterns := LoadPatterns()
-	for _, pat := range patterns {
-		if pat.ID != f.PatternID {
-			continue
-		}
+	// Registry lookup is O(1) and compile-once; the old path compiled
+	// ~30 regexes on every RecoverPlaintext call.
+	if pat := PatternByID(f.PatternID); pat != nil {
 		for _, loc := range pat.Regex.FindAllStringIndex(line, -1) {
 			val := line[loc[0]:loc[1]]
 			if len(val) < 8 {
@@ -773,4 +846,42 @@ func RecoverPlaintext(f Finding) string {
 		}
 	}
 	return ""
+}
+
+// SubmatchSpanForHash returns byte offsets [start,end) into line for the substring whose
+// SHA256 hex digest equals wantSHA256. If patternID names a catalogue pattern, only that
+// regex is used; otherwise line is scanned with the context-assignment pattern (CTX /
+// context-only findings use the variable name as pattern_id, not a catalogue id).
+func SubmatchSpanForHash(line, patternID, wantSHA256 string) (start, end int, ok bool) {
+	if patternID == PatternOpSecretRef || wantSHA256 == "" {
+		return 0, 0, false
+	}
+	if pat := PatternByID(patternID); pat != nil {
+		for _, loc := range pat.Regex.FindAllStringIndex(line, -1) {
+			val := line[loc[0]:loc[1]]
+			if len(val) < 8 {
+				continue
+			}
+			h := sha256.Sum256([]byte(val))
+			if fmt.Sprintf("%x", h) == wantSHA256 {
+				return loc[0], loc[1], true
+			}
+		}
+		return 0, 0, false
+	}
+	matches := contextPattern.FindAllStringSubmatchIndex(line, -1)
+	for _, m := range matches {
+		if len(m) < 6 {
+			continue
+		}
+		val := line[m[4]:m[5]]
+		if len(val) < 8 {
+			continue
+		}
+		h := sha256.Sum256([]byte(val))
+		if fmt.Sprintf("%x", h) == wantSHA256 {
+			return m[4], m[5], true
+		}
+	}
+	return 0, 0, false
 }
