@@ -4,7 +4,7 @@
 
 Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, `.env` files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
 
-<video src="/docs/demo1-vaultify.mov" controls muted playsinline width="720"></video>
+<video src="https://media.githubusercontent.com/media/inaor/vaultify/docs/demo1-vaultify.mov" controls muted playsinline width="720"></video>
 
 **Source (private):** [github.com/inaor/vaultify_priv](https://github.com/inaor/vaultify_priv) — clone and set `origin` to that URL when you work from a machine that should sync with GitHub.
 
