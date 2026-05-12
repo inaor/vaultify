@@ -1,91 +1,93 @@
 # Vaultify
 
-**Find plaintext secrets. Move them to your vault. Clean your code.**
+**Find plaintext secrets → move them to your vault → clean your code.**
 
-Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, `.env` files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
+Local scanner + embedded dashboard. It walks your filesystem, flags API keys and tokens, and helps you **vault**, **redact**, or **dismiss** each finding—with optional **1Password** (`op`) integration for apply flows.
 
-**Source (private):** [github.com/inaor/vaultify_priv](https://github.com/inaor/vaultify_priv) — clone and set `origin` to that URL when you work from a machine that should sync with GitHub.
+---
+
+## Video examples
+
+Add your recordings here (e.g. YouTube or Loom). Replace the placeholders when clips are ready.
+
+| Clip | Link |
+|------|------|
+| **60-second overview** | *link TBD* |
+| **First scan → Review → Apply** | *link TBD* |
+| **1Password: Connect + Open Vault** | *link TBD* |
+| **Posture & Activity (logs)** | *link TBD* |
+
+---
+
+## Quick start
+
+**Binaries:** [Releases](https://github.com/inaor/vaultify/releases) — pick the asset for your OS/arch, verify with `SHA256SUMS` when published.
 
 ```bash
-git remote add origin https://github.com/inaor/vaultify_priv.git
-# or SSH: git@github.com:inaor/vaultify_priv.git
-git push -u origin main
+chmod +x ./vaultify_*_linux_amd64   # Linux / macOS if needed
+./vaultify_*_linux_amd64
 ```
 
-Pushing a version tag (e.g. `v0.3.0`) triggers the [Release workflow](.github/workflows/release.yml) on GitHub Actions for that repo.
-
-## Quick Start
-
-**Releases:** pre-built binaries (Windows, macOS Intel/ARM, Linux x86_64/ARM64), `SHA256SUMS`, and `LICENSE` are attached to each [GitHub Release](https://github.com/inaor/vaultify_priv/releases) (same private repo; only collaborators can fetch assets unless you later mirror builds elsewhere).
-
-Pick the asset that matches your OS and architecture, e.g. `vaultify_0.3.0_linux_amd64`. Verify with `SHA256SUMS` (see the release notes).
+**macOS (first launch):** Downloaded releases are quarantined by Gatekeeper. If macOS reports the app as **“damaged”** or will not open it, strip quarantine on the `.app` bundle or bare binary (use your real path):
 
 ```bash
-# Example (Linux / macOS) — make executable if needed
-chmod +x ./vaultify_0.3.0_linux_amd64
-./vaultify_0.3.0_linux_amd64
+xattr -dr com.apple.quarantine /path/to/Vaultify-arm64.app
+# or, for the standalone Mach-O binary:
+xattr -dr com.apple.quarantine ~/Downloads/vaultify_*_darwin_arm64
 ```
 
-On Windows, run the `.exe`; the dashboard opens at `http://localhost:9471` by default.
+Then open the app or run the binary again. For a frictionless first open without this step, the distributor would need **Developer ID signing + Apple notarization** (not included in OSS builds today).
 
-That's it. Click **Start Scan**, review findings, make decisions, apply.
+Windows: run `vaultify.exe`. Browser opens **http://localhost:9471** → **Start Scan** → Review → Apply.
 
-### Native shell branding (icon parity)
-
-Vaultify ships shell-level branding for every supported platform:
-
-- **Windows** — the icon is **embedded inside `vaultify.exe`** (multi-resolution PE resource). Title bar, taskbar, Alt-Tab, Explorer thumbnails and the 1Password unlock prompt all show the Vaultify mark automatically. Nothing to install.
-- **macOS** — download `vaultify_<ver>_darwin_<arch>.app.tar.gz` and extract; you get a `Vaultify.app` bundle with `AppIcon.icns` baked in. Drop it into `/Applications` (or anywhere) and Finder/Dock show the icon. The bare `vaultify_*_darwin_*` binary is also published if you prefer the CLI without the bundle. A standalone `Vaultify.icns` is in every release if you want to wrap your own bundle.
-- **Linux** — download `vaultify_<ver>_linux-icons.tar.gz` and unpack into your icon and applications dirs:
-
-    ```bash
-    tar xzf vaultify_*_linux-icons.tar.gz
-    cp -r linux-icons/16x16 linux-icons/22x22 linux-icons/24x24 \
-          linux-icons/32x32 linux-icons/48x48 linux-icons/64x64 \
-          linux-icons/128x128 linux-icons/256x256 linux-icons/512x512 \
-          ~/.local/share/icons/hicolor/
-    cp linux-icons/vaultify.desktop ~/.local/share/applications/
-    gtk-update-icon-cache -f ~/.local/share/icons/hicolor 2>/dev/null || true
-    ```
-
-    GNOME / KDE / XFCE then show the Vaultify icon in launchers, Activities, and Alt-Tab.
-
-## What It Does
-
-1. **Scan** — walks your filesystem, matches 30+ regex patterns (AWS keys, GitHub PATs, Slack tokens, OpenAI keys, private key blocks, etc.)
-2. **Review** — interactive table showing each unique secret, where it appears, and a redacted preview
-3. **Decide** — for each secret: **Vaultify** (move to 1Password/AWS/HashiCorp), **Remove From Code** (redact in place), or **Dismiss**
-4. **Apply** — secrets are moved to your vault with `op://` references replacing the plaintext, or redacted with `REDACTED_BY_VAULTIFY`
-
-## Supported Vaults
-
-| Vault | Status | CLI |
-|-------|--------|-----|
-| 1Password | Production | `op` |
-| AWS Secrets Manager | Experimental | `aws` |
-| HashiCorp Vault | Experimental | `vault` |
-| Doppler | Experimental | `doppler` |
-
-## Pro licensing (JWT)
-
-Contract for Pro activation tokens (issuer, claims, `kid` rotation, subscription vs perpetual): **[docs/licensing-jwt-v1.md](docs/licensing-jwt-v1.md)**.
-
-## Build From Source
-
-Requires Go 1.22+.
+**From source** (Go 1.22+):
 
 ```bash
-# Current platform
 go build -ldflags "-s -w -X github.com/vaultify/vaultify/internal/buildinfo.BuildVersion=0.3.0" -o vaultify ./cmd/vaultify
-
-# Pro build (unlimited scan): set BuildEdition=pro (optional: override MaxScanFilesStr=0 on free is redundant)
-go build -ldflags "-s -w -X github.com/vaultify/vaultify/internal/buildinfo.BuildVersion=0.3.0 -X github.com/vaultify/vaultify/internal/buildinfo.BuildEdition=pro" -o vaultify ./cmd/vaultify
-
-# Cross-compile all release targets into dist/ + SHA256SUMS
-make all                            # Unix shell + Make
-pwsh ./scripts/build-release.ps1    # Windows / PowerShell equivalent
 ```
+
+Full cross-build (icons + `dist/`): `make all` or `pwsh ./scripts/build-release.ps1`.
+
+---
+
+## What you get
+
+| | |
+|--|--|
+| **Scan** | Fast path-based walk + many secret patterns |
+| **Review** | Table of unique hits, redacted previews, decisions |
+| **Apply** | Vault references / redaction (1Password path today) |
+| **Posture** | Rolling window of findings over time (SQLite) |
+
+**Vaults today:** **1Password** (`op`) is the supported apply path; **AWS** stub exists; **HashiCorp Vault** / **Doppler** are reserved in the UI for later.
+
+---
+
+## GitHub release at the same version
+
+The [release workflow](.github/workflows/release.yml) runs on `v*` tags and stamps `internal/buildinfo.BuildVersion` from the tag (for example `v0.3.0` → `0.3.0`). To ship **new binaries and assets** without changing that number:
+
+1. On GitHub, remove the release tied to the tag if you want a clean release page (optional).
+2. Delete the tag locally and on the remote, then recreate it on the commit you want published:
+
+```bash
+git tag -d v0.3.0
+git push origin :refs/tags/v0.3.0
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+3. After install, run a **new** build of `vaultify` / `Vaultify.app` and **hard refresh** the dashboard so embedded `dashboard.html` and `/assets/*` update.
+
+---
+
+## Docs & licensing
+
+- **JWT / worker contract** (for forks or your own signer): [docs/licensing-jwt-v1.md](docs/licensing-jwt-v1.md)
+- **Release CI:** [.github/workflows/release.yml](.github/workflows/release.yml)
+
+---
 
 ## License
 
-[MIT License](LICENSE)
+[MIT](LICENSE)
