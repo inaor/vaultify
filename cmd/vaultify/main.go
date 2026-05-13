@@ -190,7 +190,7 @@ func printBanner(port int, rep paths.MigrationReport, dbInfo string) {
 
 // runPostureBackfill replays every active session row through the
 // posture store on the FIRST boot after the posture feature shipped,
-// so a Pro user sees a populated rolling-30-day view immediately
+// so users see a populated rolling-30-day view immediately
 // instead of having to wait for fresh scans to accumulate.
 //
 // Idempotent: a row in app_state pins the backfill to a single boot.

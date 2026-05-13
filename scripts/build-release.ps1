@@ -53,9 +53,7 @@ if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
 New-Item -ItemType Directory -Path $dist | Out-Null
 
 $ldflagsCommon = "-s -w -X github.com/vaultify/vaultify/internal/buildinfo.BuildVersion=$Version"
-# Single binary: no BuildEdition override on customer-facing artefacts.
-# Pro is unlocked at runtime by a license JWT (see internal/license).
-# A QA-only Pro build is produced by scripts/build-pro-dev.ps1.
+# Single open-source binary: no extra linker overrides on release artefacts.
 $ldflagsRelease = $ldflagsCommon
 
 function Build-VaultifyIcons {
@@ -96,10 +94,9 @@ function Build-VaultifyBinaries {
         @{ goos = 'linux';   goarch = 'amd64'; suffix = ''     },
         @{ goos = 'linux';   goarch = 'arm64'; suffix = ''     }
     )
-    # `release` is the standard customer-facing tag and is omitted
-    # from the filename so the asset names stay short. Non-release
-    # tags (`pro-dev`, `qa`, etc.) are surfaced explicitly so internal
-    # builds can never be mistaken for the public release artefact.
+    # `release` is the standard tag and is omitted from the filename
+    # so asset names stay short. Other edition tags are surfaced in the
+    # filename when used for non-release builds.
     $tagSuffix = ''
     if ($EditionTag -and $EditionTag -ne 'release') { $tagSuffix = "_$EditionTag" }
 
@@ -177,10 +174,7 @@ function Build-VaultifyMacBundles {
     }
 }
 
-# Single-binary release: one dist/ tree. Customers receive Pro by
-# pasting a JWT license into Settings -> Activate Pro. The license
-# package (internal/license) verifies offline against an embedded
-# Ed25519 public key.
+# Single-binary release: one dist/ tree for all platforms.
 if (-not $SkipIcons)   { Build-VaultifyIcons   -DistDir $dist }
 Build-VaultifyBinaries -DistDir $dist -Ldflags $ldflagsRelease -Ver $Version -EditionTag 'release'
 if (-not $SkipBundles) { Build-VaultifyMacBundles -DistDir $dist -Ver $Version -EditionTag 'release' }

@@ -34,7 +34,7 @@ func TestVaultRefAlwaysNotValidatable(t *testing.T) {
 
 // TestPlaceholderTextIsFake covers the cheapest, highest-leverage win
 // for the user: marking docs / examples / placeholders so they never
-// burn a Pro quota on validation.
+// waste a validation call on obvious non-secrets.
 func TestPlaceholderTextIsFake(t *testing.T) {
 	cases := []struct {
 		name, value string

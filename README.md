@@ -81,9 +81,8 @@ git push origin v0.3.0
 
 ---
 
-## Docs & licensing
+## Docs
 
-- **JWT / worker contract** (for forks or your own signer): [docs/licensing-jwt-v1.md](docs/licensing-jwt-v1.md)
 - **Release CI:** [.github/workflows/release.yml](.github/workflows/release.yml)
 
 ---

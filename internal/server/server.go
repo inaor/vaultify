@@ -54,12 +54,6 @@ type Server struct {
 	vaultSelectCLI string
 	veeVaultName   string
 
-	// Per-session FREE quota for active validations (10/session).
-	// Pro builds bypass this entirely; the map only ever grows so the
-	// memory ceiling is bounded by sessions per process lifetime.
-	valQuotaMu sync.Mutex
-	valQuota   map[string]int
-
 	// sqliteDB is the embedded SQLite handle, used by the validation
 	// API for the cache table and the Posture extension. Optional:
 	// when nil, validations run uncached.
@@ -242,7 +236,7 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/logs/tail", srv.handleLogsTail)
 	mux.HandleFunc("GET /api/logs/ws", srv.handleLogsWebSocket)
 
-	// ---- 30-day rolling Posture (Pro feature) ----
+	// ---- 30-day rolling Posture ----
 	mux.HandleFunc("GET /api/posture", srv.handlePosture)
 
 	// ---- Secret Validation (Slices B/C/D) ----

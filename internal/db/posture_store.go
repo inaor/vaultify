@@ -19,8 +19,7 @@ import (
 // drift over time.
 //
 // The store is intentionally separate from SessionStore: posture is a
-// derived projection. A future "Posture only" Pro feature can read
-// from here without touching session writes.
+// derived projection so reads can happen without coupling to session writes.
 type PostureStore struct {
 	db *sql.DB
 
@@ -314,8 +313,8 @@ func markAbsentDeleted(ctx context.Context, tx *sql.Tx, roots []string, seen map
 }
 
 // Recent returns every posture row currently inside the rolling
-// window, newest activity first. The caller is expected to be
-// authorised (e.g. Pro tier check) — the store does not gate.
+// window, newest activity first. The caller is expected to enforce
+// HTTP auth / session scoping — the store does not gate.
 func (p *PostureStore) Recent(ctx context.Context, now time.Time) ([]PostureFinding, error) {
 	cutoff := now.Add(-p.Window).UTC().Format(time.RFC3339)
 	rows, err := p.db.QueryContext(ctx, `

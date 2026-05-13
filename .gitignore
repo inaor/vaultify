@@ -10,9 +10,7 @@ sessions/
 .cursor/
 __debug_bin*
 
-# License signing material — public keys live in source, private keys
-# never do. Real production private keys go straight into the
-# Cloudflare Worker secret store via `wrangler secret put`.
+# Local secret material (do not commit)
 .dev-keys/
 *.priv
 license.jwt

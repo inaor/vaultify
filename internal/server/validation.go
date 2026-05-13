@@ -11,16 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vaultify/vaultify/internal/buildinfo"
 	"github.com/vaultify/vaultify/internal/db"
 	"github.com/vaultify/vaultify/internal/scanner"
 	"github.com/vaultify/vaultify/internal/session"
 	"github.com/vaultify/vaultify/internal/validation"
 )
-
-// FREE-tier active-validation budget per scan session. The Pro modal
-// pops with the contextual cap message when this is exhausted.
-const freeValidationCapPerSession = 10
 
 // validateRequest is the body of POST /api/validate (single).
 type validateRequest struct {
@@ -32,26 +27,16 @@ type validateRequest struct {
 // validateResponse is the success body. UI uses status + reason to
 // flip the chip; cached lets the row hint "from cache" when desired.
 type validateResponse struct {
-	MatchSHA256    string `json:"match_sha256"`
-	ValidatorID    string `json:"validator_id"`
-	Status         string `json:"status"`
-	Reason         string `json:"reason"`
-	HTTPStatus     int    `json:"http_status,omitempty"`
-	CheckedAt      string `json:"checked_at"`
-	Cached         bool   `json:"cached"`
-	QuotaRemaining int    `json:"quota_remaining,omitempty"`
-}
-
-// proRequiredResponse is the structured 402 body so the UI can pop
-// the existing Pro modal with a relevant message and feature label.
-type proRequiredResponse struct {
-	ProRequired bool   `json:"pro_required"`
-	Feature     string `json:"feature"`
-	Message     string `json:"message"`
+	MatchSHA256 string `json:"match_sha256"`
+	ValidatorID string `json:"validator_id"`
+	Status      string `json:"status"`
+	Reason      string `json:"reason"`
+	HTTPStatus  int    `json:"http_status,omitempty"`
+	CheckedAt   string `json:"checked_at"`
+	Cached      bool   `json:"cached"`
 }
 
 // handleValidate runs an active validation for a single finding.
-// Per-session FREE cap applies; cache hits do not count against it.
 func (srv *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	var req validateRequest
 	if err := readRequestJSON(r, &req); err != nil {
@@ -82,8 +67,7 @@ func (srv *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cache hit shortcut. We always read cache for both Free and Pro;
-	// it's the active call that's the gated/expensive operation.
+	// Cache hit shortcut: return a fresh row from SQLite when TTL allows.
 	if !req.Force && srv.sqliteDB != nil {
 		if rec, ok, err := db.GetValidation(r.Context(), srv.sqliteDB, req.MatchSHA256); err == nil && ok && rec.IsFresh(time.Now()) {
 			writeJSON(w, http.StatusOK, validateResponse{
@@ -97,21 +81,6 @@ func (srv *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-	}
-
-	// FREE quota gate. Pro bypasses entirely; reads of cache above
-	// already short-circuited so this is a real outbound network call.
-	if !buildinfo.IsPro() {
-		used, ok := srv.consumeValidationQuota(req.SessionID, 1)
-		if !ok {
-			writeJSON(w, http.StatusPaymentRequired, proRequiredResponse{
-				ProRequired: true,
-				Feature:     "active_validation",
-				Message:     fmt.Sprintf("Free tier validations exhausted (%d/session). Upgrade to Pro for unlimited live validation, bulk checks, and one-click Playbooks.", freeValidationCapPerSession),
-			})
-			return
-		}
-		_ = used
 	}
 
 	res, audErr := srv.runValidator(r.Context(), finding, "user")
@@ -129,12 +98,6 @@ func (srv *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		Reason:      res.Reason,
 		HTTPStatus:  res.HTTPStatus,
 		CheckedAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-	if !buildinfo.IsPro() {
-		resp.QuotaRemaining = freeValidationCapPerSession - srv.peekValidationQuota(req.SessionID)
-		if resp.QuotaRemaining < 0 {
-			resp.QuotaRemaining = 0
-		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -207,7 +170,7 @@ func (srv *Server) findInSession(sessionID, hash string) (scanner.Finding, error
 	return scanner.Finding{}, fmt.Errorf("finding not found in session")
 }
 
-// ----- bulk validation (Pro) ---------------------------------------
+// ----- bulk validation (optional build) --------------------------------
 
 type validateBulkRequest struct {
 	SessionID    string   `json:"session_id"`
@@ -227,14 +190,6 @@ type validateBulkResponse struct {
 }
 
 func (srv *Server) handleValidateBulk(w http.ResponseWriter, r *http.Request) {
-	if !buildinfo.IsPro() {
-		writeJSON(w, http.StatusPaymentRequired, proRequiredResponse{
-			ProRequired: true,
-			Feature:     "bulk_validation",
-			Message:     "Bulk active validation is a Pro feature. The Free per-row Check button still works (10/session).",
-		})
-		return
-	}
 	var req validateBulkRequest
 	if err := readRequestJSON(r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
@@ -321,7 +276,7 @@ func (srv *Server) handleValidateBulk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, validateBulkResponse{Results: results})
 }
 
-// ----- Playbook (Pro) ---------------------------------------------
+// ----- Playbook request/response types ---------------------------------
 
 type playbookRequest struct {
 	SessionID    string   `json:"session_id"`
@@ -342,15 +297,6 @@ type playbookResponse struct {
 }
 
 func (srv *Server) handlePlaybook(w http.ResponseWriter, r *http.Request) {
-	if !buildinfo.IsPro() {
-		writeJSON(w, http.StatusPaymentRequired, proRequiredResponse{
-			ProRequired: true,
-			Feature:     "playbook",
-			Message:     "Apply & Secure Everything is a Pro feature. It validates each finding, vaults active keys, removes revoked ones, and graveyards placeholders in one click.",
-		})
-		return
-	}
-
 	var req playbookRequest
 	if err := readRequestJSON(r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
@@ -479,27 +425,4 @@ func short(h string) string {
 		return h
 	}
 	return h[:8]
-}
-
-// consumeValidationQuota decrements the FREE budget for this session.
-// Returns (used_this_call, false) when the budget is exhausted.
-func (srv *Server) consumeValidationQuota(sid string, n int) (int, bool) {
-	srv.valQuotaMu.Lock()
-	defer srv.valQuotaMu.Unlock()
-	if srv.valQuota == nil {
-		srv.valQuota = map[string]int{}
-	}
-	used := srv.valQuota[sid]
-	if used+n > freeValidationCapPerSession {
-		return used, false
-	}
-	srv.valQuota[sid] = used + n
-	return used + n, true
-}
-
-// peekValidationQuota returns the count consumed so far, without mutating.
-func (srv *Server) peekValidationQuota(sid string) int {
-	srv.valQuotaMu.Lock()
-	defer srv.valQuotaMu.Unlock()
-	return srv.valQuota[sid]
 }

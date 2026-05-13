@@ -6,7 +6,7 @@
   <title>Vaultify</title>
   <link rel="icon" type="image/png" href="/assets/vaultify_logo.png">
   <link rel="apple-touch-icon" href="/assets/vaultify_logo.png">
-  <link rel="stylesheet" href="/assets/style.css?v=0.6.2">
+  <link rel="stylesheet" href="/assets/style.css?v=0.6.4">
 </head>
 <body>
   <div class="sidebar">
@@ -454,7 +454,7 @@
                 <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-slate);font-size:.72rem;text-transform:uppercase">Install</th>
               </tr></thead>
               <tbody>
-                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">1Password</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--c-cyan)">op</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-success)">Production</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id AgileBits.1Password.CLI</td></tr>
+                <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">1Password</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--c-cyan)">op</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-success)">Available</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id AgileBits.1Password.CLI</td></tr>
                 <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">AWS Secrets Manager</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--c-cyan)">aws</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-violet)">Planned</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id Amazon.AWSCLI</td></tr>
                 <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">HashiCorp Vault</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--c-cyan)">vault</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--c-violet)">Planned</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id Hashicorp.Vault</td></tr>
                 <tr><td style="padding:8px 12px;font-weight:600">Doppler</td><td style="padding:8px 12px;font-family:monospace;color:var(--c-cyan)">doppler</td><td style="padding:8px 12px;color:var(--c-violet)">Planned</td><td style="padding:8px 12px;font-family:monospace;font-size:.78rem;color:var(--c-slate)">winget install -e --id Doppler.CLI</td></tr>
@@ -536,13 +536,18 @@
   </div>
 
   <!-- VEE PANEL -->
-  <div class="vee-panel open" id="veePanel">
+  <div class="vee-panel" id="veePanel" role="complementary" aria-label="Vee assistant">
     <div class="vee-header">
       <img src="/assets/vee-avatar.png" class="vee-avatar" alt="Vee" onclick="App.tour.start()" style="cursor:pointer" title="Start Walkthrough">
       <div class="vee-name">Vee <span>Secrets Agent</span></div>
-      <button class="vee-settings-btn" onclick="App.openVeeSettings()" title="Vee vault settings" aria-label="Vee vault settings">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.44.17-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-      </button>
+      <div class="vee-header-actions">
+        <button type="button" class="vee-settings-btn" onclick="App.openVeeSettings()" title="Vee vault settings" aria-label="Vee vault settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.44.17-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        </button>
+        <button type="button" class="vee-collapse-btn" id="veeCollapseBtn" onclick="App.setVeePanelCollapsed(true)" title="Hide Vee panel" aria-label="Hide Vee panel">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6-6-6z"/></svg>
+        </button>
+      </div>
     </div>
     <div class="vee-providers" id="veeProviders"></div>
     <div class="vee-prov-label" id="veeProvLabel">Select a provider to start</div>
@@ -559,6 +564,11 @@
       <button class="vee-send" id="veeSendBtn" onclick="App.veeSend()" disabled>Send</button>
     </div>
   </div>
+
+  <button type="button" class="vee-rail-btn" id="veeRailBtn" onclick="App.setVeePanelCollapsed(false)" title="Show Vee panel" aria-label="Show Vee panel">
+    <span class="vee-rail-icon" aria-hidden="true">&#x2728;</span>
+    <span class="vee-rail-label">Vee</span>
+  </button>
 
   <!-- TOAST CONTAINER -->
   <div class="toast-container" id="toastContainer"></div>
@@ -616,6 +626,6 @@
     </div>
   </div>
 
-  <script type="module" src="/assets/app.js?v=0.6.2"></script>
+  <script type="module" src="/assets/app.js?v=0.6.4"></script>
 </body>
 </html>
