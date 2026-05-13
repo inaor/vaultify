@@ -24,31 +24,14 @@ chmod +x ./vaultify_0.3.0_linux_amd64
 ./vaultify_0.3.0_linux_amd64
 ```
 
-On Windows, run the `.exe`; On MacOs unpack the `.app` and the dashboard will open at `http://localhost:9471` by default.
+- On Windows, run the `.exe`; 
+- On MacOs unpack the `.app` 
+- The dashboard should open at `http://localhost:9471` by default.
 
-That's it. Click **Start Scan**, review findings, make decisions, apply.
-
-<img width="848" height="824" alt="Untitled" src="https://github.com/user-attachments/assets/274e191c-af17-40e8-9fbf-9a228eccff5a" />
-
-On your report you have a number of options - **Vaultify**, **Remove** or **Junk**.
-
-## Quick Start
-
-**Releases:** pre-built binaries (Windows, macOS Intel/ARM, Linux x86_64/ARM64), `SHA256SUMS`, and `LICENSE` are attached to each [GitHub Release](https://github.com/inaor/vaultify/releases). Pick the asset that matches your OS and architecture, e.g. `vaultify_0.3.0_linux_amd64`. Verify with `SHA256SUMS` (see the release notes).
-
-```bash
-# Example (Linux / macOS) — make executable if needed
-chmod +x ./vaultify_0.3.0_linux_amd64
-./vaultify_0.3.0_linux_amd64
-```
-
-On Windows, run the `.exe`; the dashboard opens at `http://localhost:9471` by default.
-
-That's it. Click **Start Scan**, review findings, make decisions, apply.
+That's it. Click **Start Scan** or **Specific Folder**, then in the generated choose how to secure your secrets - **Vaultify**, **Remove** or **Junk**.
+review findings, make decisions, apply.
 
 <img width="848" height="824" alt="Untitled" src="https://github.com/user-attachments/assets/274e191c-af17-40e8-9fbf-9a228eccff5a" />
-
-On your report you have a number of options - **Vaultify**, **Remove** or **Junk**.
 
 ## What It Does
 
