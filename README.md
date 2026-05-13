@@ -1,25 +1,36 @@
 
 
 
-# Vaultify
-
-**Find plaintext secrets. Move them to your vault. Clean your code.**
-
-Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, `.env` files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
-
 <p align="center">
-  <video
-    src="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69"
-    width="848"
+<img width="90" height="90" alt="vaultify_logo" src="https://github.com/user-attachments/assets/05e36d75-cdb6-46e4-a0ba-003d257a395a" /><img width="200" height="90" alt="vaultify_logo_long" src="https://github.com/user-attachments/assets/b258e763-ad8f-400a-bb0c-1dc6f2ccd9ba" />
+</p>
+<p align="center">
+**Find plaintext secrets. Move them to your vault. Clean your code.**
+</p>
+Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
+
+<video src="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69" width="848"
     height="477"
     controls
-    playsinline
-    preload="metadata"
-  ></video>
-</p>
+    playsinline></video>
 
+## Quick Start
 
-Pushing a version tag (e.g. `v0.3.0`) triggers the [Release workflow](.github/workflows/release.yml) on GitHub Actions for that repo.
+**Releases:** pre-built binaries (Windows, macOS Intel/ARM, Linux x86_64/ARM64), `SHA256SUMS`, and `LICENSE` are attached to each [GitHub Release](https://github.com/inaor/vaultify/releases). Pick the asset that matches your OS and architecture, e.g. `vaultify_0.3.0_linux_amd64`. Verify with `SHA256SUMS` (see the release notes).
+
+```bash
+# Example (Linux / macOS) — make executable if needed
+chmod +x ./vaultify_0.3.0_linux_amd64
+./vaultify_0.3.0_linux_amd64
+```
+
+On Windows, run the `.exe`; On MacOs unpack the `.app` and the dashboard will open at `http://localhost:9471` by default.
+
+That's it. Click **Start Scan**, review findings, make decisions, apply.
+
+<img width="848" height="824" alt="Untitled" src="https://github.com/user-attachments/assets/274e191c-af17-40e8-9fbf-9a228eccff5a" />
+
+On your report you have a number of options - **Vaultify**, **Remove** or **Junk**.
 
 ## Quick Start
 
