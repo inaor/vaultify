@@ -6,6 +6,15 @@
 </p>
 <p align="center"><b>Find plaintext secrets. Move them to your vault. Clean your code.</b></p>
 
+<p align="center">
+  <a href="https://github.com/inaor/vaultify/releases/latest"><img src="https://img.shields.io/github/v/release/inaor/vaultify?sort=semver&logo=github&label=version" alt="Latest GitHub release" /></a>
+  <a href="https://github.com/inaor/vaultify/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/inaor/vaultify?filename=go.mod&logo=go&label=Go" alt="Go version from go.mod" /></a>
+  <a href="https://github.com/inaor/vaultify/blob/main/LICENSE"><img src="https://img.shields.io/github/license/inaor/vaultify?label=license" alt="License" /></a>
+  <a href="https://github.com/inaor/vaultify/commits/main/"><img src="https://img.shields.io/github/last-commit/inaor/vaultify/main?label=last%20commit" alt="Last commit on main" /></a>
+  <a href="https://pkg.go.dev/github.com/vaultify/vaultify"><img src="https://pkg.go.dev/badge/github.com/vaultify/vaultify.svg" alt="Go package documentation" /></a>
+  <img src="https://img.shields.io/badge/NHI%E2%80%94relevant_secrets_%26_service_identity-6e40c9" alt="NHI-adjacent: exposed keys and service credentials" title="Surface API keys, tokens, and other material tied to non-human / machine identity in local code and config" />
+</p>
+
 Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
 
 https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69
