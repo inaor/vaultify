@@ -1,92 +1,75 @@
+
+
+
 # Vaultify
 
-**Find plaintext secrets → move them to your vault → clean your code.**
+**Find plaintext secrets. Move them to your vault. Clean your code.**
 
-Local scanner + embedded dashboard. It walks your filesystem, flags API keys and tokens, and helps you **vault**, **redact**, or **dismiss** each finding—with optional **1Password** (`op`) integration for apply flows.
+Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, `.env` files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
 
----
+<video src="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69"></video>
 
-## Video examples
 
-Add your recordings here (e.g. YouTube or Loom). Replace the placeholders when clips are ready.
+Pushing a version tag (e.g. `v0.3.0`) triggers the [Release workflow](.github/workflows/release.yml) on GitHub Actions for that repo.
 
-| Clip | Link |
-|------|------|
-| **60-second overview** | *link TBD* |
-| **First scan → Review → Apply** | *link TBD* |
-| **1Password: Connect + Open Vault** | *link TBD* |
-| **Posture & Activity (logs)** | *link TBD* |
+## Quick Start
 
----
-
-## Quick start
-
-**Binaries:** [Releases](https://github.com/inaor/vaultify/releases) — pick the asset for your OS/arch, verify with `SHA256SUMS` when published.
+**Releases:** pre-built binaries (Windows, macOS Intel/ARM, Linux x86_64/ARM64), `SHA256SUMS`, and `LICENSE` are attached to each [GitHub Release](https://github.com/inaor/vaultify/releases). Pick the asset that matches your OS and architecture, e.g. `vaultify_0.3.0_linux_amd64`. Verify with `SHA256SUMS` (see the release notes).
 
 ```bash
-chmod +x ./vaultify_*_linux_amd64   # Linux / macOS if needed
-./vaultify_*_linux_amd64
+# Example (Linux / macOS) — make executable if needed
+chmod +x ./vaultify_0.3.0_linux_amd64
+./vaultify_0.3.0_linux_amd64
 ```
 
-**macOS (first launch):** Downloaded releases are quarantined by Gatekeeper. If macOS reports the app as **“damaged”** or will not open it, strip quarantine on the `.app` bundle or bare binary (use your real path):
+On Windows, run the `.exe`; the dashboard opens at `http://localhost:9471` by default.
+
+That's it. Click **Start Scan**, review findings, make decisions, apply.
+
+<img width="848" height="824" alt="Untitled" src="https://github.com/user-attachments/assets/274e191c-af17-40e8-9fbf-9a228eccff5a" />
+
+On your report you have a number of options - **Vaultify**, **Remove** or **Junk**.
+
+## What It Does
+
+1. **Scan** — walks your filesystem, matches 30+ regex patterns (AWS keys, GitHub PATs, Slack tokens, OpenAI keys, private key blocks, etc.)
+2. **Review** — interactive table showing each unique secret, where it appears, and a redacted preview
+3. **Decide** — for each secret: **Vaultify** (move to 1Password/AWS/HashiCorp), **Remove From Code** (redact in place), or **Dismiss**
+4. **Apply** — secrets are moved to your vault with `op://` references replacing the plaintext, or redacted with `REDACTED_BY_VAULTIFY`
+
+## Features
+
+Using the Walkthrough you can find all the app features, including Vee, your Secret Agent, her FP Finder (requires AI model token), Generating reports, follow remediation, increase your secrets catalogue and more.
+
+**Take into mind that the app is still in the making and might introduce bugs. Feel free to report them**
+
+## Supported Vaults
+
+| Vault | Status | CLI |
+|-------|--------|-----|
+| 1Password | Production | `op` |
+| AWS Secrets Manager | Experimental | `aws` |
+| HashiCorp Vault | Experimental | `vault` |
+| Doppler | Experimental | `doppler` |
+
+## Build From Source
+
+Requires Go 1.22+.
 
 ```bash
-xattr -dr com.apple.quarantine /path/to/Vaultify-arm64.app
-# or, for the standalone Mach-O binary:
-xattr -dr com.apple.quarantine ~/Downloads/vaultify_*_darwin_arm64
-```
-
-Then open the app or run the binary again. For a frictionless first open without this step, the distributor would need **Developer ID signing + Apple notarization** (not included in OSS builds today).
-
-Windows: run `vaultify.exe`. Browser opens **http://localhost:9471** → **Start Scan** → Review → Apply.
-
-**From source** (Go 1.22+):
-
-```bash
+# Current platform
 go build -ldflags "-s -w -X github.com/vaultify/vaultify/internal/buildinfo.BuildVersion=0.3.0" -o vaultify ./cmd/vaultify
+
+# Cross-compile all release targets into dist/ + SHA256SUMS
+make all                            # Unix shell + Make
+pwsh ./scripts/build-release.ps1    # Windows / PowerShell equivalent
 ```
-
-Full cross-build (icons + `dist/`): `make all` or `pwsh ./scripts/build-release.ps1`.
-
----
-
-## What you get
-
-| | |
-|--|--|
-| **Scan** | Fast path-based walk + many secret patterns |
-| **Review** | Table of unique hits, redacted previews, decisions |
-| **Apply** | Vault references / redaction (1Password path today) |
-| **Posture** | Rolling window of findings over time (SQLite) |
-
-**Vaults today:** **1Password** (`op`) is the supported apply path; **AWS** stub exists; **HashiCorp Vault** / **Doppler** are reserved in the UI for later.
-
----
-
-## GitHub release at the same version
-
-The [release workflow](.github/workflows/release.yml) runs on `v*` tags and stamps `internal/buildinfo.BuildVersion` from the tag (for example `v0.3.0` → `0.3.0`). To ship **new binaries and assets** without changing that number:
-
-1. On GitHub, remove the release tied to the tag if you want a clean release page (optional).
-2. Delete the tag locally and on the remote, then recreate it on the commit you want published:
-
-```bash
-git tag -d v0.3.0
-git push public :refs/tags/v0.3.0
-git tag v0.3.0
-git push public v0.3.0
-```
-
-3. After install, run a **new** build of `vaultify` / `Vaultify.app` and **hard refresh** the dashboard so embedded `dashboard.html` and `/assets/*` update.
-
----
-
-## Docs
-
-- **Release CI:** [.github/workflows/release.yml](.github/workflows/release.yml)
-
----
 
 ## License
 
-[MIT](LICENSE)
+[MIT License](LICENSE)
+
+## Purpose
+
+Vaultify was made by researchers, for researchers. 
+For more about us, visit [JOES](https://www.securityjoes.com)
