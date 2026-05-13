@@ -7,6 +7,8 @@ import (
 	"net/http"
 )
 
+// Request body helpers enforce a maximum JSON payload size.
+
 const maxJSONBodySize = 4 << 20 // 4 MiB
 
 var errBodyTooLarge = errors.New("request body too large")

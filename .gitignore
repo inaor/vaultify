@@ -10,6 +10,10 @@ sessions/
 .cursor/
 __debug_bin*
 
+# Accidental local macOS binary drops (ship via GitHub Releases, not git)
+vaultify-macos-arm
+vaultify-macos-intel
+
 # Local secret material (do not commit)
 .dev-keys/
 *.priv

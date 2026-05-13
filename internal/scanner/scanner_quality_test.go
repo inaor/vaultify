@@ -1,3 +1,4 @@
+// Regression corpus for pattern true-positive vs false-positive behaviour.
 package scanner
 
 import (
@@ -87,12 +88,12 @@ PULUMI = "pulumi-1234567890abcdef1234567890abcdef12345678"
 NOTION = "secret_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABCDEF"
 `,
 			expected: map[string]bool{
-				"private_key_block": true,
-				"shopify_token":     true,
+				"private_key_block":   true,
+				"shopify_token":       true,
 				"atlassian_api_token": true,
-				"databricks":        true,
-				"pulumi":            true,
-				"notion":            true,
+				"databricks":          true,
+				"pulumi":              true,
+				"notion":              true,
 			},
 		},
 
@@ -126,10 +127,10 @@ function handleCallback() {
 }
 `,
 			expected: map[string]bool{
-				"mailgun":    false,
-				"twilio":     false,
+				"mailgun":     false,
+				"twilio":      false,
 				"twilio_auth": false,
-				"databricks": false,
+				"databricks":  false,
 			},
 		},
 		{
@@ -160,7 +161,7 @@ access_token = create_access_token(
 `,
 			expected: map[string]bool{
 				"access_token_expires": false,
-				"access_token":       false,
+				"access_token":         false,
 			},
 		},
 		{
@@ -169,8 +170,8 @@ access_token = create_access_token(
 OTHER_SECRET=op://DriverSeat/Jira/credential/password
 `,
 			expected: map[string]bool{
-				"JIRA_API_TOKEN": false,
-				"OTHER_SECRET":   false,
+				"JIRA_API_TOKEN":   false,
+				"OTHER_SECRET":     false,
 				PatternOpSecretRef: true,
 			},
 		},

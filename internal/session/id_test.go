@@ -2,6 +2,8 @@ package session
 
 import "testing"
 
+// Session ID format tests.
+
 func TestIsValidID(t *testing.T) {
 	id := NewID()
 	if !IsValidID(id) {

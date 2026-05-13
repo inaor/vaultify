@@ -28,7 +28,8 @@ type CompiledPattern struct {
 }
 
 type patternsFile struct {
-	Patterns []Pattern `json:"patterns"`
+	SchemaVersion string    `json:"schema_version,omitempty"`
+	Patterns      []Pattern `json:"patterns"`
 }
 
 // Pattern registry: parse patterns.json and compile every regex exactly
