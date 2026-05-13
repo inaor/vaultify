@@ -11,12 +11,7 @@
 Vaultify scans your machine for potential leaked non-human identities like API keys, tokens, and credentials scattered across config files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
 *Vaultify can't understand Run-time. **Please be mindful with NHIs you vault**.
 
-https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69
-
-<p align="center"><a href="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69">
-
-
-Pushing a version tag (e.g. `v0.3.0`) triggers the [Release workflow](.github/workflows/release.yml) on GitHub Actions for that repo.
+<video src="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69"></video>
 
 ## Quick Start
 
@@ -32,17 +27,21 @@ chmod +x ./vaultify_0.3.0_linux_amd64
 - On MacOs unpack the `.app` 
 - The dashboard should open at `http://localhost:9471` by default.
 
-That's it. Click **Start Scan** or **Specific Folder**, then in the generated choose how to secure your secrets - **Vaultify**, **Remove** or **Junk**.
+That's it. Click **Start Scan** or **Specific Folder**, then in the generated report choose how to secure your secrets - **Vaultify**, **Remove** or **Junk**.
 review findings, make decisions, apply.
 
 <img width="848" height="824" alt="Untitled" src="https://github.com/user-attachments/assets/274e191c-af17-40e8-9fbf-9a228eccff5a" />
 
 ## What It Does
 
-1. **Scan** — walks your filesystem, matches 30+ regex patterns (AWS keys, GitHub PATs, Slack tokens, OpenAI keys, private key blocks, etc.)
-2. **Review** — interactive table showing each unique secret, where it appears, and a redacted preview
-3. **Decide** — for each secret: **Vaultify** (move to 1Password/AWS/HashiCorp), **Remove From Code** (redact in place), or **Dismiss**
-4. **Apply** — secrets are moved to your vault with `op://` references replacing the plaintext, or redacted with `REDACTED_BY_VAULTIFY`
+1. **Scan** - walks your filesystem, matches 30+ regex patterns (AWS keys, GitHub PATs, Slack tokens, OpenAI keys, private key blocks, etc.)
+2. **Review** - interactive table showing each unique secret, where it appears, and a redacted preview
+3. **Decide** - for each secret: **Vaultify** (move to 1Password/AWS/HashiCorp), **Remove From Code** (redact in place), or **Dismiss**
+4. **Apply Decisions** - secrets are moved to your vault with `op://` references replacing the plaintext, or redacted with `REDACTED_BY_VAULTIFY`
+5. **Reports** - track your remediation process with the generated reports. with each secret handle, reports are updated
+6. **Vee** - Vee is your Secret Agent. It's a BYOAI tuned to help you with the secrets management and provide you asisstance.
+
+**Inspect other features and let us know how you liked them
 
 ## Features
 
