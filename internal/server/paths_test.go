@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+// isSubpath guards browse API against directory escape attempts.
+
 func TestIsSubpath(t *testing.T) {
 	tmp := t.TempDir()
 	inside := filepath.Join(tmp, "a", "b")

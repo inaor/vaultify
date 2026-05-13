@@ -8,24 +8,13 @@ import (
 // Link-time overrides (defaults suit the open-source build).
 var (
 	BuildVersion    = "0.3.0"
-	BuildEdition    = "open" // retained for ldflags; Edition() always reports open source
-	MaxScanFilesStr = "0"    // "0" = unlimited (default for OSS)
+	MaxScanFilesStr = "0" // "0" = unlimited
 )
 
-// Edition returns a stable edition label for /api/version and the UI.
-// Open-source builds do not use tiered licensing.
+// Edition returns a stable label for /api/version and the UI.
 func Edition() string {
 	return "open"
 }
-
-// IsPro is retained so existing feature gates compile; the OSS tree
-// always behaves as fully unlocked.
-func IsPro() bool {
-	return true
-}
-
-// SetRuntimePro is a no-op kept for API compatibility with older call sites.
-func SetRuntimePro(_ bool) {}
 
 // MaxScanFiles returns the inclusive file scan cap: 0 means unlimited.
 func MaxScanFiles() int {

@@ -1,3 +1,4 @@
+// Package exclusions persists suppressed finding fingerprints across scans.
 package exclusions
 
 import (

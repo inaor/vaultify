@@ -11,6 +11,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// WebSocket hub fans out scan progress to connected dashboard clients.
+
 // Hub maintains the set of active WebSocket clients and broadcasts messages.
 type Hub struct {
 	mu         sync.RWMutex

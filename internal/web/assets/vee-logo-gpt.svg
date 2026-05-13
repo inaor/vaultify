@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="GPT">
+  <!-- Vaultify v0.3.0 -->
   <defs>
     <linearGradient id="gptBg" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
       <stop stop-color="#10A37F"/>

@@ -1,4 +1,5 @@
 {
+  "schema_version": "0.3.0",
   "patterns": [
     {"id": "aws_access_key_id", "prefix": "AKIA", "regex": "AKIA[0-9A-Z]{16}", "severity": "critical", "description": "AWS Access Key ID", "ignore_case": false, "added_in": "0.1.0"},
     {"id": "aws_temp_access_key_id", "prefix": "ASIA", "regex": "ASIA[0-9A-Z]{16}", "severity": "critical", "description": "AWS temporary Access Key ID", "ignore_case": false, "added_in": "0.1.0"},

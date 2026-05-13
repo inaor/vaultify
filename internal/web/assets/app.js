@@ -22,7 +22,7 @@ const App = {
   currentPage: 'dashboard',
   vaultList: [],
   sessionId: null,
-  /** True when the last completed scan hit the free-tier file cap. */
+  /** True when the last completed scan stopped early because of the configured file cap. */
   lastScanCapped: false,
   _capBannerDismissed: false,
 
@@ -38,13 +38,43 @@ const App = {
     this.loadSessions();
     this.loadVeeProviders();
     this._setupVeeChatInput();
+    this._initVeePanelLayout();
     this.updateFooters();
   },
 
-  /** Fetches /api/version and syncs edition + file_cap + version into UI state.
-   *  Version flows from buildinfo.BuildVersion → /api/version → here, so a
-   *  release bump only touches one Go file; the sidebar pill, footer, and
-   *  Catalogue NEW-tag all update on next load. */
+  /** Persisted: Vee side panel tucked off-screen so Review uses full width. */
+  veePanelCollapsed: false,
+
+  _initVeePanelLayout() {
+    try {
+      this.veePanelCollapsed = localStorage.getItem('vaultify_vee_panel_collapsed') === '1';
+    } catch (_) {
+      this.veePanelCollapsed = false;
+    }
+    this._applyVeePanelCollapsedClass();
+  },
+
+  setVeePanelCollapsed(collapsed) {
+    this.veePanelCollapsed = !!collapsed;
+    try {
+      localStorage.setItem('vaultify_vee_panel_collapsed', this.veePanelCollapsed ? '1' : '0');
+    } catch (_) {}
+    this._applyVeePanelCollapsedClass();
+  },
+
+  _applyVeePanelCollapsedClass() {
+    document.body.classList.toggle('vee-collapsed', this.veePanelCollapsed);
+    const panel = document.getElementById('veePanel');
+    if (panel) panel.setAttribute('aria-hidden', this.veePanelCollapsed ? 'true' : 'false');
+  },
+
+  toggleVeePanel() {
+    this.setVeePanelCollapsed(!this.veePanelCollapsed);
+  },
+
+  /** Fetches /api/version and syncs file_cap + version into UI state.
+   *  Version comes from buildinfo.BuildVersion → /api/version → sidebar pill,
+   *  footer, and Catalogue NEW tags on next load. */
   async loadEditionInfo() {
     try {
       const v = await (await fetch('/api/version')).json();
@@ -400,6 +430,7 @@ const App = {
     let requestedAuditView = false;
     if (page === 'audit') { page = 'activity'; requestedAuditView = true; }
     else if (page === 'logs') { page = 'activity'; }
+    // Old builds exposed a separate settings hash; remap to dashboard.
     if (page === 'license') { page = 'dashboard'; }
 
     const prevPage = this.currentPage;
@@ -767,8 +798,6 @@ const App = {
     if (el('progVal')) { el('progVal').textContent = pct + '%'; el('progVal').style.color = sc; }
     if (el('gFiles')) el('gFiles').textContent = files + ' / ' + denom;
     if (el('gCap')) el('gCap').textContent = this.fileCapLabel();
-    const capPro = el('btnCapPro');
-    if (capPro) capPro.style.display = (this.edition === 'pro' || this.state.file_cap === 0) ? 'none' : '';
 
     const pathRow = el('currentPathRow');
     const pathEl = el('currentPath');
@@ -2151,8 +2180,7 @@ const App = {
   },
 
   // _validationConsentKey + _validationConsentAccepted: per-validator
-  // first-use consent. Stored in localStorage. Free users confirm once
-  // per provider; Pro users can pre-accept all in Settings (later).
+  // first-use consent. Stored in localStorage.
   _validationConsentKey(validatorID) {
     return 'vaultify_validation_consent_' + validatorID;
   },
@@ -2215,7 +2243,7 @@ const App = {
     }
 
     if (typeof resp.quota_remaining === 'number') {
-      this._showToast(`Validated. ${resp.quota_remaining} free checks left this session.`);
+      this._showToast(`Validated. ${resp.quota_remaining} validation check(s) left this session.`);
     }
   },
 
@@ -2249,8 +2277,7 @@ const App = {
     }
   },
 
-  // Playbook (Pro). Stages the Vee recommendations into decisions.json
-  // and then opens the existing Apply modal so the user confirms.
+  // Playbook: stages Vee recommendations into decisions, then Apply confirms.
   async runPlaybook() {
     try {
       const r = await fetch('/api/playbook', {
@@ -2675,29 +2702,6 @@ const App = {
     });
   },
 
-  /**
-   * Legacy hook: upsell UI was removed for the open-source build.
-   * Any remaining onclick handlers route here and surface a toast.
-   */
-  showProModal(opts) {
-    const msg = (opts && opts.message) ? opts.message : 'That feature is not available in this build.';
-    this.showToast(msg, 'info');
-  },
-
-  hideProModal() {
-    if (this._proModalNavigateOnHide) {
-      const dest = this._proModalNavigateOnHide;
-      this._proModalNavigateOnHide = '';
-      this.navigate(dest);
-    }
-  },
-
-  showEnterpriseModal() {
-    this.showToast('Fleet and org-wide dashboards are out of scope for this open-source scanner.', 'info');
-  },
-
-  hideEnterpriseModal() {},
-
   toggleAuditSort(c) {
     if (this.auditSort.col === c) this.auditSort.dir *= -1;
     else {
@@ -2854,113 +2858,29 @@ const App = {
   releaseNotes: [
     {
       version: '0.3.0',
-      date: 'April 2026',
+      date: 'May 2026',
       current: true,
       changes: [
-        { type: 'new', text: 'Secret Validation & Decision system — heuristic Status chip per Review row (LIKELY FAKE / LOOKS REAL / NO LIVE CHECK / ACTIVE / INVALID / ERROR); pure-local detection of placeholders, demo fixtures, repeated chars; risk-tuned color palette (active=red, invalid=green)' },
-        { type: 'new', text: 'Active validation: per-row [Check] button hits the real provider via vaultify.exe (never the browser); cached by match_sha256 in SQLite (never stores plaintext); audit-logged; first-use vendor-disclosure consent' },
-        { type: 'new', text: 'Validator registry: OpenAI, Anthropic, Gemini, Slack, GitHub (classic + fine-grained), Stripe, SendGrid (8 live); AWS marked unsupported until paired-secret pairing lands' },
-        { type: 'new', text: 'Vee recommendation engine — deterministic rules merge heuristic + active validation + severity into one suggested action per row (vault / remove / graveyard / keep / rotate) with reason + confidence; Adopt button in Review one-click applies' },
-        { type: 'new', text: 'Bulk validation + Apply & Secure Everything Playbook (Pro): worker-pool concurrency, stages Vee recommendations into decisions for one-click confirm' },
-        { type: 'new', text: 'Posture extension: validation_status flowed into posture rows; new "Active right now" headline card surfaces live keys still on disk' },
-        { type: 'new', text: 'Scheduled re-validation (Pro): daily background pass refreshes validation cache for present posture rows whose TTL expired' },
-        { type: 'new', text: 'FREE limit: 10 active per-row validations per session; Pro modal pops with contextual cap message when exceeded' },
-        { type: 'new', text: 'Embedded SQLite store (pure-Go, WAL, foreign-keys) replaces JSON-on-disk for sessions; one-shot non-destructive importer migrates legacy sessions on first boot' },
-        { type: 'new', text: 'Accumulated Posture (Pro) — 30-day rolling fingerprint of every distinct finding with present/removed lifecycle, drift tracking, and pruning' },
-        { type: 'new', text: 'Posture backfill — chronological replay of historical sessions through the posture engine, idempotent via app_state flag' },
-        { type: 'new', text: 'Activity page — Audit Log and Live Logs merged into one surface with Live stream / Audit ledger toggle' },
-        { type: 'new', text: 'Pro modal restructured as a mission-led FREE vs Pro comparison table with pricing and clear CTA' },
-        { type: 'new', text: 'Cross-platform shell branding: Vaultify icon embedded in vaultify.exe, Vaultify.app bundles for macOS, hicolor PNG set + .desktop template for Linux' },
-        { type: 'new', text: 'Tools: tools/icogen produces multi-resolution .ico, retina-aware .icns, and Linux PNG sets from one source PNG (pure stdlib, no external deps)' },
-        { type: 'new', text: 'Walkthrough refreshed — added Posture (Pro) and Activity stops; refreshed Vee Pro pitch' },
-        { type: 'new', text: 'Vee provider strip uses real ChatGPT/Claude/Gemini/Ollama logos instead of placeholder marks' },
-        { type: 'perf', text: 'Posture merge runs in a single transaction with INSERT OR IGNORE remediation tracking; per-scan auto-credit of vault_ref findings' },
-        { type: 'fix', text: 'Reports remediation column credits good_practice graveyard actions and op:// vault references' },
-        { type: 'fix', text: 'Cap-hit Pro modal pops with contextual message before navigating to Review for Free-tier scans that hit the 10K-file cap' },
-      ]
-    },
-    {
-      version: '0.1.7',
-      date: 'April 2026',
-      changes: [
-        { type: 'new', text: 'Context Detection Layer — identifies secrets by variable name (api_key, password, secret_access, db_url) in assignment patterns' },
-        { type: 'new', text: 'Sequenced detection pipeline: Pre-validate → Layer 2 Context → Layer 1 Value Patterns → Post-validate with confidence scoring' },
-        { type: 'new', text: 'Shannon entropy computed and displayed for all findings — cyan numbers in Review table and Findings Explorer' },
-        { type: 'new', text: 'CTX badge on context-detected findings, checkmark when both layers agree' },
-        { type: 'new', text: '.env and credential file highlighting in Findings Explorer with high-density warnings' },
-        { type: 'new', text: 'Confidence-based auto-suggest — context-only findings stay pending for human review' },
-        { type: 'new', text: 'Pattern Graph node glow scales with average entropy; context nodes in rose' },
-        { type: 'new', text: 'Docs page — Detection Pipeline, Entropy Scoring, Security Model, Supported Vaults, File Coverage' },
-        { type: 'new', text: 'Vee Enterprise tier with diamond badges, suited Vee avatar, and Contact Sales modal' },
-        { type: 'new', text: 'Application log file at %TEMP%/vaultify-scans/.logs/vaultify-app.log' },
-        { type: 'perf', text: 'Force-directed Canvas graph replacing SVG — 60fps physics simulation' },
-        { type: 'fix', text: 'Scan stuck at 100% — auto-complete after 3s and WebSocket reconnect sync' },
-        { type: 'fix', text: 'Scan conflict recovery — auto-stops stale scans on retry' },
-        { type: 'new', text: 'Choose a Vault: four provider tiles in the sidebar (2×2), selectable sync focus; 1Password default; subtle glow when op CLI or session missing' },
-        { type: 'new', text: 'Scan complete → Review (skipped during Walkthrough); unified op session check for Apply, Vee chat/summary, FP Finder' },
-        { type: 'fix', text: 'Apply Decisions confirm disabled when op CLI missing but Vaultify decisions exist' },
-      ]
-    },
-    {
-      version: '0.1.6',
-      date: 'April 2026',
-      changes: [
-        { type: 'perf', text: 'Prefix-based fast-skip scanning — 10-50x faster scan performance' },
-        { type: 'new', text: 'Pattern Node Graph visualization replacing flat bar charts' },
-        { type: 'new', text: 'Findings Tree Explorer with collapsible folder structure' },
-        { type: 'new', text: 'Unified color system — consistent semantic colors across all pages' },
-        { type: 'new', text: 'Expandable full-screen Pattern Graph modal' },
-        { type: 'fix', text: 'Restored snippet button with redacted secret values in previews' },
-        { type: 'fix', text: 'Browser extension directories excluded from scanning (Brave, Chrome, Firefox, Edge, Yandex, Opera, Vivaldi)' },
-        { type: 'fix', text: 'Auto-suggest no longer falsely dismisses secrets in cache directories' },
-        { type: 'fix', text: 'NuGet and Artifactory false positive reduction with higher entropy thresholds' },
-        { type: 'fix', text: 'OpenAI legacy pattern entropy threshold raised to reduce minified JS matches' },
-      ]
-    },
-    {
-      version: '0.1.5',
-      date: 'April 2026',
-      changes: [
-        { type: 'new', text: 'Scan dashboard redesign — hero status bar, animated counters, severity donut chart' },
-        { type: 'new', text: 'Choose a Vault: vendor logos, official install links, then PATH detection + 1Password package install' },
-        { type: 'new', text: 'Pro tier teaser — Unified Dashboard, Compliance, Settings with crown badges' },
-        { type: 'new', text: 'Pro modal with Vee in crown pose' },
-        { type: 'new', text: 'Toast notifications on scan complete' },
-        { type: 'new', text: 'Elapsed time and files/s throughput during scan' },
-        { type: 'new', text: 'Current file path shown in scan progress' },
-        { type: 'new', text: 'Scan type indicator — Machine Scan vs Folder Scan in status pill' },
-        { type: 'new', text: '20+ additional file types and extensionless files now scanned' },
-        { type: 'fix', text: 'Folder picker backslash path bug on Windows' },
-        { type: 'fix', text: 'Report buttons layout spacing' },
-      ]
-    },
-    {
-      version: '0.1.4',
-      date: 'April 2026',
-      changes: [
-        { type: 'security', text: 'Eliminated plaintext.json — zero secrets written to disk, ever' },
-        { type: 'security', text: 'Line snippets redacted in session storage and API responses' },
-        { type: 'security', text: 'WebSocket broadcasts stripped of secret values' },
-        { type: 'security', text: '.bak backup files removed — no pre-redaction copies' },
-        { type: 'security', text: 'File permissions tightened to owner-only (0o700/0o600)' },
-        { type: 'security', text: 'Gemini API key moved from URL query string to header' },
-        { type: 'security', text: 'WebSocket origin validation — localhost only' },
-        { type: 'security', text: 'Error responses sanitized — no internal paths or CLI output leaked' },
-        { type: 'new', text: '24 new detection patterns — Dropbox, Figma, HubSpot, Discord, Docker, PyPI, and more (54 total)' },
-        { type: 'new', text: 'Secret Catalogue page with searchable, paginated pattern library' },
-        { type: 'new', text: 'Good Practice recognition for temporary/rotating credentials' },
-        { type: 'new', text: 'Bulk decision buttons — Vaultify All Critical, Vaultify All High, Dismiss All Low' },
-        { type: 'new', text: 'Auto-suggest decisions on scan complete with undo banner' },
-        { type: 'new', text: 'Session archiving — Active/Archive tabs in Reports' },
-        { type: 'new', text: '1Password CLI one-click install button in Choose a Vault' },
-        { type: 'new', text: 'Interactive walkthrough tour with live demo scan and Vee as guide' },
-        { type: 'new', text: 'Scan folder picker with directory browser and quick picks' },
-        { type: 'new', text: 'Vee loading spinner when connecting AI provider' },
-        { type: 'new', text: 'Remediation summary renders under Review table instead of chat' },
-        { type: 'new', text: 'Vee falls back to most recent session when no active scan' },
-        { type: 'fix', text: 'Duplicate Vee label in chat messages' },
-        { type: 'fix', text: 'Empty parens in provider activation message' },
-        { type: 'new', text: 'MIT License, .gitignore cleanup, GitHub Actions CI for cross-platform releases' },
+        { type: 'new', text: 'Review: heuristic Status chip per row (likely fake / looks real / no live check / active / invalid / error) plus local checks for placeholders, demos, and low-entropy noise' },
+        { type: 'new', text: 'Active validation: per-row Check runs against the real provider from vaultify on your machine (not the browser); outcomes cached in SQLite by match hash without storing plaintext; audit trail; first-use consent per provider' },
+        { type: 'new', text: 'Validator coverage for common APIs (OpenAI, Anthropic, Gemini, Slack, GitHub classic and fine-grained PATs, Stripe, SendGrid); AWS pairing deferred' },
+        { type: 'new', text: 'Vee recommendations merge heuristics, validation, and severity into one suggested action per row with optional one-click adopt' },
+        { type: 'new', text: 'Bulk validation and “Apply & Secure Everything” playbook: stage Vee-aligned decisions for batch review before Apply' },
+        { type: 'new', text: 'Posture: validation status on rows, headline for credentials still present on disk, 30-day rolling history with drift and pruning' },
+        { type: 'new', text: 'Scheduled background re-validation for posture rows whose cache TTL expired' },
+        { type: 'new', text: 'Per-session cap on live validation calls with clear server messaging when the limit is reached' },
+        { type: 'new', text: 'SQLite-backed sessions (WAL, foreign keys) with one-shot import from legacy JSON stores' },
+        { type: 'new', text: 'Posture backfill replays historical sessions idempotently' },
+        { type: 'new', text: 'Activity view merges live server log stream and on-disk audit ledger' },
+        { type: 'new', text: 'Cross-platform shell assets: embedded Windows icon, macOS .app bundles, Linux hicolor set and desktop template' },
+        { type: 'new', text: 'tools/icogen builds .ico, .icns, and Linux PNG sets from one source image (stdlib only)' },
+        { type: 'new', text: 'Walkthrough covers Posture, Activity, vault selection, Review, and Apply' },
+        { type: 'new', text: 'Vee provider strip uses vendor artwork for each LLM backend' },
+        { type: 'perf', text: 'Faster posture merges via batched transactions and vault-reference auto-credit during scans' },
+        { type: 'fix', text: 'Reports remediation column counts good-practice junkyard actions and op:// references correctly' },
+        { type: 'fix', text: 'Clear banner when a scan stops at the configured file cap before navigating to Review' },
+        { type: 'new', text: 'Vee side panel can tuck off the right edge; slim rail restores it; preference saved locally for narrow displays' },
+        { type: 'fix', text: 'Version diagnostics trimmed to build metadata only' },
       ]
     }
   ],
@@ -2972,22 +2892,11 @@ const App = {
       if (v.edition) this.edition = String(v.edition).toLowerCase();
       const el = document.getElementById('versionContent');
       if (!el) return;
-      const ed = (v.edition || 'open').toLowerCase();
-      const edHtml = ed === 'open' || ed === 'oss'
-        ? '<strong style="font-size:1.08em;letter-spacing:.06em;color:var(--c-cyan)">Open source</strong>'
-        : '<strong style="font-size:1.08em;letter-spacing:.06em;color:var(--c-cyan)">' + this.esc(ed.toUpperCase()) + '</strong>';
-      const capNum = typeof v.file_cap === 'number' ? v.file_cap : parseInt(String(v.file_cap), 10);
-      const capLabel = (typeof v.file_cap === 'number' && v.file_cap === 0) || (Number.isFinite(capNum) && capNum === 0)
-        ? 'Unlimited'
-        : (Number.isFinite(capNum) && !Number.isNaN(capNum) ? this.esc(Number(capNum).toLocaleString()) : this.esc(String(v.file_cap ?? '')));
       el.innerHTML = `<div style="font-size:.9rem;display:grid;grid-template-columns:140px 1fr;gap:8px 16px;padding:8px 0">
         <span style="color:var(--c-slate)">Version</span><span style="font-weight:700;color:var(--c-cyan)">${this.esc(v.version)}</span>
-        <span style="color:var(--c-slate)">Edition</span><span>${edHtml}</span>
-        <span style="color:var(--c-slate)">Scan file cap</span><span>${capLabel}</span>
         <span style="color:var(--c-slate)">Build</span><span>${this.esc(v.build)}</span>
         <span style="color:var(--c-slate)">OS</span><span>${this.esc(v.os)}</span>
         <span style="color:var(--c-slate)">Architecture</span><span>${this.esc(v.arch)}</span>
-        <span style="color:var(--c-slate)">Domain</span><span><a href="https://vaultify.live" target="_blank" rel="noopener noreferrer" style="color:var(--c-indigo)">vaultify.live</a></span>
       </div>`;
 
       const notesEl = document.getElementById('releaseNotes');
@@ -3018,8 +2927,6 @@ const App = {
   veeOpen: false,
   veeProvider: '',
   veeProviders: [],
-
-  toggleVee() {},
 
   async loadVeeProviders(checkVault) {
     try {
@@ -3673,8 +3580,8 @@ const App = {
         targetSelector: '[data-page="posture"]',
         title: 'Posture and Activity',
         text: "Posture keeps a rolling 30-day fingerprint of distinct findings so you can see drift and removals, not just the last scan. Activity merges live server logs with the on-disk audit ledger when you need to trace what happened.",
-        beforeStep: async () => { document.querySelectorAll('[data-page="posture"],[data-page="activity"]').forEach(el => { el.classList.add('pro-blink'); }); },
-        afterStep: async () => { document.querySelectorAll('[data-page="posture"],[data-page="activity"]').forEach(el => { el.classList.remove('pro-blink'); }); }
+        beforeStep: async () => { document.querySelectorAll('[data-page="posture"],[data-page="activity"]').forEach(el => { el.classList.add('tour-nav-blink'); }); },
+        afterStep: async () => { document.querySelectorAll('[data-page="posture"],[data-page="activity"]').forEach(el => { el.classList.remove('tour-nav-blink'); }); }
       },
       {
         target: null,
@@ -3776,8 +3683,8 @@ const App = {
         targetSelector: '[data-page="posture"]',
         title: 'Accumulated Posture',
         text: "Open Posture anytime from the sidebar. Each row is a unique pattern + path + value-hash. When something disappears from a re-scan, it flips to Removed for the rest of the 30-day window so you can show remediation actually happened.",
-        beforeStep: async () => { document.querySelectorAll('[data-page="posture"]').forEach(el => el.classList.add('pro-blink')); },
-        afterStep: async () => { document.querySelectorAll('[data-page="posture"]').forEach(el => el.classList.remove('pro-blink')); }
+        beforeStep: async () => { document.querySelectorAll('[data-page="posture"]').forEach(el => el.classList.add('tour-nav-blink')); },
+        afterStep: async () => { document.querySelectorAll('[data-page="posture"]').forEach(el => el.classList.remove('tour-nav-blink')); }
       },
       {
         target: null,
@@ -3800,8 +3707,8 @@ const App = {
         target: '#releaseNotes',
         page: 'version',
         position: 'top',
-        title: 'Release Notes',
-        text: "Every version, every change, right here. Security fixes, performance improvements, new patterns — full transparency. We ship fast and we ship often."
+        title: 'Release notes',
+        text: 'Each release lists security fixes, performance work, and new detection patterns for this open-source build.'
       }
     ],
 
@@ -3844,8 +3751,6 @@ const App = {
       document.getElementById('tourCounter').textContent = `${n + 1} of ${this.steps.length}`;
       document.getElementById('tourBack').style.display = n === 0 ? 'none' : '';
       document.querySelector('.tour-bubble-avatar').src = s.avatar || '/assets/vee-avatar.png';
-      const bubble = document.getElementById('tourBubble');
-      bubble.classList.toggle('tour-bubble-pro', !!s.pro);
 
       const nextBtn = document.getElementById('tourNext');
       nextBtn.textContent = n === this.steps.length - 1 ? 'Finish' : 'Next';

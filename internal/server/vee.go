@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vaultify/vaultify/internal/buildinfo"
 	"github.com/vaultify/vaultify/internal/scanner"
 	"github.com/vaultify/vaultify/internal/session"
 	"github.com/vaultify/vaultify/internal/vault"
@@ -418,7 +417,7 @@ func describeProviderError(p *ProviderError) string {
 	case ErrRateLimit:
 		return "provider rate limit hit (429). Try again in a few seconds."
 	case ErrQuota:
-		return "provider quota exhausted. Check your plan or billing."
+		return "provider quota exhausted. Check your API plan or usage limits."
 	case ErrNetwork:
 		return "could not reach provider. Check your internet connection."
 	case ErrBadInput:
@@ -935,10 +934,6 @@ type veeFpFinderResponse struct {
 func (srv *Server) handleVeeFpFinder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !buildinfo.IsPro() {
-		httpError(w, http.StatusForbidden, "Vee FP Finder is a Vaultify Pro feature.")
 		return
 	}
 	var req veeFpFinderRequest

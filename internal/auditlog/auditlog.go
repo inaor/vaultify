@@ -1,3 +1,4 @@
+// Package auditlog implements a simple append-only JSON audit trail for the local agent.
 package auditlog
 
 import (

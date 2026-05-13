@@ -10,6 +10,8 @@ import (
 	"github.com/vaultify/vaultify/internal/session"
 )
 
+// Path helpers compare scan roots and enforce browse-directory containment.
+
 func pathsEqual(a, b string) bool {
 	na, ea := filepath.Abs(filepath.Clean(a))
 	nb, eb := filepath.Abs(filepath.Clean(b))

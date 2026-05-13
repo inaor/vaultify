@@ -6,22 +6,21 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/vaultify/vaultify/internal/buildinfo"
 	"github.com/vaultify/vaultify/internal/scanner"
 	"github.com/vaultify/vaultify/internal/validation"
 )
 
-// StartScheduledValidation kicks off a Pro-only background goroutine
-// that re-validates Posture rows whose validation cache has aged out.
+// StartScheduledValidation kicks off a background goroutine that
+// re-validates Posture rows whose validation cache has aged out.
 // One pass per 24h, bounded concurrency. Bails out cleanly if Posture
-// or the SQLite handle isn't wired (Free builds, --no-db, etc).
+// or the SQLite handle isn't wired (--no-db, etc).
 //
 // The goroutine has no shutdown channel: the process exits when main
 // returns, which collapses every outstanding network call. That's the
 // right behaviour for a CLI agent — we never want re-validation to
 // block process shutdown.
 func (srv *Server) StartScheduledValidation() {
-	if !buildinfo.IsPro() || srv.sqliteDB == nil || srv.posture == nil {
+	if srv.sqliteDB == nil || srv.posture == nil {
 		return
 	}
 	go func() {

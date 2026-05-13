@@ -31,8 +31,8 @@ type PostureBackfillReport struct {
 }
 
 // BackfillPostureFromSessions replays every session row through the
-// posture store in chronological order so a Pro user sees a populated
-// Posture page on first visit, instead of having to wait for fresh
+// posture store in chronological order so the Posture view is
+// populated on first visit, instead of having to wait for fresh
 // scans. Idempotent via the AppStateKeyPostureBackfilled flag — a
 // second call is a no-op.
 //
