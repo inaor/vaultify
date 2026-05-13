@@ -4,7 +4,7 @@
 <img width="90" height="90" alt="vaultify_logo" src="https://github.com/user-attachments/assets/05e36d75-cdb6-46e4-a0ba-003d257a395a" /><br /><img width="200" height="90" alt="vaultify_logo_long" src="https://github.com/user-attachments/assets/b258e763-ad8f-400a-bb0c-1dc6f2ccd9ba" />
 </p>
 
-## Runs locally. Finds plaintext secrets. Move them to your vault in one click.
+## *Runs locally. Finds plaintext secrets. Move them to your vault in one click.*
 
 <p align="center">
   <a href="https://github.com/inaor/vaultify/releases/latest"><img src="https://img.shields.io/github/v/release/inaor/vaultify?sort=semver&logo=github&label=version" alt="Latest GitHub release" /></a>
@@ -17,7 +17,7 @@
 
 Vaultify scans your machine for potential leaked non-human identities like API keys, tokens, and credentials scattered across config files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
 
-*Vaultify can't understand Run-time. **Please be mindful with NHIs you vault**.*
+*Vaultify isn't collecting keys/tokens or stores them in any shape or form. **However, it doesn't understand if your project needs run-time keys - please be mindful when vaulting NHIs**.*
 
 https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69
 
