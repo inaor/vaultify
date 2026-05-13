@@ -4,9 +4,12 @@
 <p align="center">
 <img width="90" height="90" alt="vaultify_logo" src="https://github.com/user-attachments/assets/05e36d75-cdb6-46e4-a0ba-003d257a395a" /><img width="200" height="90" alt="vaultify_logo_long" src="https://github.com/user-attachments/assets/b258e763-ad8f-400a-bb0c-1dc6f2ccd9ba" />
 </p>
-<p align="center"><b>Find plaintext secrets. Move them to your vault. Clean your code.</b></p>
 
-Vaultify scans your machine for leaked API keys, tokens, and credentials scattered across config files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
+## Runs locally. Finds plaintext secrets. Move them to your vault in one click. Cleans you code.
+
+
+Vaultify scans your machine for potential leaked non-human identities like API keys, tokens, and credentials scattered across config files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
+*Vaultify can't understand Run-time. **Please be mindful with NHIs you vault**.
 
 https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69
 
@@ -51,7 +54,7 @@ Using the Walkthrough you can find all the app features, including Vee, your Sec
 
 | Vault | Status | CLI |
 |-------|--------|-----|
-| 1Password | Production | `op` |
+| 1Password | Ready | `op` |
 | AWS Secrets Manager | Experimental | `aws` |
 | HashiCorp Vault | Experimental | `vault` |
 | Doppler | Experimental | `doppler` |
