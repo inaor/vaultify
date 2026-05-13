@@ -13,7 +13,7 @@ Vaultify scans your machine for potential leaked non-human identities like API k
 
 https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69
 
-<p align="center"><a href="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69"><b>Open demo video</b></a> — the inline player scales with the clip’s resolution; export around <b>1280px</b> wide for a larger embed.</p>
+<p align="center"><a href="https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69">
 
 
 Pushing a version tag (e.g. `v0.3.0`) triggers the [Release workflow](.github/workflows/release.yml) on GitHub Actions for that repo.
