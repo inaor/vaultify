@@ -1,7 +1,7 @@
 
 
 <p align="center">
-<img width="90" height="90" alt="vaultify_logo" src="https://github.com/user-attachments/assets/05e36d75-cdb6-46e4-a0ba-003d257a395a" /><img width="200" height="90" alt="vaultify_logo_long" src="https://github.com/user-attachments/assets/b258e763-ad8f-400a-bb0c-1dc6f2ccd9ba" />
+<img width="90" height="90" alt="vaultify_logo" src="https://github.com/user-attachments/assets/05e36d75-cdb6-46e4-a0ba-003d257a395a" /><br /><img width="200" height="90" alt="vaultify_logo_long" src="https://github.com/user-attachments/assets/b258e763-ad8f-400a-bb0c-1dc6f2ccd9ba" />
 </p>
 
 ## Runs locally. Finds plaintext secrets. Move them to your vault in one click. Cleans your code.
