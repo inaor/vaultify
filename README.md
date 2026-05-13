@@ -72,9 +72,9 @@ The [release workflow](.github/workflows/release.yml) runs on `v*` tags and stam
 
 ```bash
 git tag -d v0.3.0
-git push origin :refs/tags/v0.3.0
+git push public :refs/tags/v0.3.0
 git tag v0.3.0
-git push origin v0.3.0
+git push public v0.3.0
 ```
 
 3. After install, run a **new** build of `vaultify` / `Vaultify.app` and **hard refresh** the dashboard so embedded `dashboard.html` and `/assets/*` update.
