@@ -11,7 +11,7 @@
   <a href="https://github.com/inaor/vaultify/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/inaor/vaultify?filename=go.mod&logo=go&label=Go" alt="Go version from go.mod" /></a>
   <a href="https://github.com/inaor/vaultify/blob/main/LICENSE"><img src="https://img.shields.io/github/license/inaor/vaultify?label=license" alt="License" /></a>
   <a href="https://github.com/inaor/vaultify/commits/main/"><img src="https://img.shields.io/github/last-commit/inaor/vaultify/main?label=last%20commit" alt="Last commit on main" /></a>
-  <a href="https://pkg.go.dev/github.com/vaultify/vaultify"><img src="https://pkg.go.dev/badge/github.com/inaor/vaultify.svg" alt="Go package documentation" /></a>
+  <a href="https://pkg.go.dev/github.com/inaor/vaultify"><img src="https://pkg.go.dev/badge/github.com/inaor/vaultify.svg" alt="Go package documentation" /></a>
   <img src="https://img.shields.io/badge/NHI%E2%80%94relevant_secrets_%26_service_identity-6e40c9" alt="NHI-adjacent: exposed keys and service credentials" title="Surface API keys, tokens, and other material tied to non-human / machine identity in local code and config" />
 </p>
 
