@@ -1,4 +1,4 @@
-module github.com/vaultify/vaultify
+module github.com/inaor/vaultify
 
 go 1.25.0
 
