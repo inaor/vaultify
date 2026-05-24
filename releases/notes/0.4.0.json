@@ -1,0 +1,18 @@
+{
+  "version": "0.4.0",
+  "date": "May 2026",
+  "summary": "One-line install, in-app upgrade checks, native macOS app bundle, and reliable 1Password CLI integration.",
+  "changes": [
+    { "type": "new", "text": "Install and upgrade scripts for macOS, Linux, and Windows (`install.sh`, `install.ps1`, `install-local.sh`)" },
+    { "type": "new", "text": "In-app Upgrade pill and Version page check against GitHub releases and `releases/latest.json`" },
+    { "type": "new", "text": "macOS `Vaultify.app` bundle with proper dock/Finder icon and 1Password CLI auth branding (not Terminal)" },
+    { "type": "new", "text": "1Password: CLI path discovery when launched from GUI (Homebrew `op` on minimal PATH), developer settings deep link, and clearer locked/unconnected states" },
+    { "type": "new", "text": "Dev inventory context (JetBrains, VS Code extensions, Eclipse, MCP configs) attached to scan sessions" },
+    { "type": "new", "text": "Archive scan support for `.zip` archives from the dashboard" },
+    { "type": "new", "text": "Export CSV and Export Audit from the dashboard scan menu" },
+    { "type": "fix", "text": "Live validation Check button: session ID was read from the wrong App state (stale or missing session error)" },
+    { "type": "fix", "text": "Scanner excludes Vaultify's own data dir, test fixtures, and embedded web assets to reduce self-scan noise" },
+    { "type": "fix", "text": "macOS app icon set regenerated via `iconutil` (no tiny 16px slots that upscale blurry in system prompts)" },
+    { "type": "perf", "text": "Pattern-aware validator routing and validation provider cleanup" }
+  ]
+}

@@ -4,6 +4,7 @@
   "released_at": "2026-05-24",
   "release_url": "https://github.com/securityjoes/vaultify/releases/tag/v0.4.0",
   "download_url": "https://github.com/securityjoes/vaultify/releases/latest",
+  "notes_url": "https://raw.githubusercontent.com/securityjoes/vaultify/main/releases/notes/0.4.0.json",
   "install_script_url": "https://raw.githubusercontent.com/securityjoes/vaultify/main/scripts/install.sh",
   "install_script_windows_url": "https://raw.githubusercontent.com/securityjoes/vaultify/main/scripts/install.ps1"
 }

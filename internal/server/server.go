@@ -210,6 +210,7 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 		})
 	})
 	mux.HandleFunc("GET /api/version/check", srv.handleVersionCheck)
+	mux.HandleFunc("GET /api/version/notes", srv.handleVersionNotes)
 
 	// ---- Vee AI agent ----
 	mux.HandleFunc("POST /api/vee/chat", srv.handleVeeChat)

@@ -161,6 +161,7 @@ jobs:
             "released_at": "${DATE}",
             "release_url": "https://github.com/${REPO}/releases/tag/${TAG}",
             "download_url": "https://github.com/${REPO}/releases/latest",
+            "notes_url": "https://raw.githubusercontent.com/${REPO}/main/releases/notes/${VERSION}.json",
             "install_script_url": "https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh",
             "install_script_windows_url": "https://raw.githubusercontent.com/${REPO}/main/scripts/install.ps1"
           }
@@ -176,46 +177,64 @@ jobs:
           git commit -m "chore: bump releases/latest.json to v${VERSION}"
           git push origin main
 
+      - name: Compose release notes body
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES="releases/notes/${VERSION}.md"
+          if [ -f "$NOTES" ]; then
+            cp "$NOTES" /tmp/release_body.md
+            echo "" >> /tmp/release_body.md
+          else
+            {
+              echo "## Release v${VERSION}"
+              echo ""
+              echo "_Add \`releases/notes/${VERSION}.md\` before tagging to publish human release notes._"
+              echo ""
+            } > /tmp/release_body.md
+          fi
+          cat >> /tmp/release_body.md <<'EOF'
+          ## Downloads
+
+          | Asset | Platform |
+          |-------|----------|
+          | `vaultify_*_windows_amd64.exe` | Windows (x86_64) — icon embedded in the binary |
+          | `vaultify_*_darwin_amd64` / `vaultify_*_darwin_arm64` | macOS bare CLI binaries |
+          | `vaultify_*_darwin_amd64.app.tar.gz` / `*_darwin_arm64.app.tar.gz` | macOS `Vaultify.app` bundle (extracts to `Vaultify.app` with native dock/Finder icon) |
+          | `vaultify_*_linux_amd64` / `vaultify_*_linux_arm64` | Linux bare CLI binaries |
+          | `Vaultify.icns` | Standalone macOS icon (drop into your own bundle) |
+          | `vaultify_*_linux-icons.tar.gz` | Linux hicolor PNG set + `vaultify.desktop` template (extract under `~/.local/share/icons/` and `~/.local/share/applications/`) |
+          | `SHA256SUMS` | SHA-256 hashes for the binaries and `Vaultify.icns` |
+          | `LICENSE` | MIT |
+
+          ### Verify checksums
+
+          Download `SHA256SUMS` next to your binary, then:
+
+          - **Linux:** `sha256sum -c SHA256SUMS --ignore-missing`
+          - **macOS:** `shasum -a 256 -c SHA256SUMS` (only if you downloaded every file listed in `SHA256SUMS`, or check one file: `shasum -a 256 vaultify_*` and compare to the file)
+          - **Windows (PowerShell):** `Get-FileHash .\vaultify_*_windows_amd64.exe -Algorithm SHA256` and compare to the line in `SHA256SUMS`
+
+          ### Install (recommended)
+
+          - **macOS / Linux:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash`
+          - **Windows (PowerShell):** `irm https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.ps1 | iex`
+
+          After install, open a new terminal and run `vaultify` from any directory.
+
+          ### Notes
+
+          - Run `./vaultify` (or `vaultify.exe` on Windows). The dashboard opens at `http://localhost:9471` by default.
+          - macOS binaries are **not** Apple-notarized; you may need to allow the app under **System Settings → Privacy & Security** the first time.
+          - 1Password integration requires the [1Password CLI](https://developer.1password.com/docs/cli) (`op`) where you use vault features.
+          EOF
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
-          generate_release_notes: true
-          append_body: true
-          body: |
-            ## Downloads
-
-            | Asset | Platform |
-            |-------|----------|
-            | `vaultify_*_windows_amd64.exe` | Windows (x86_64) — icon embedded in the binary |
-            | `vaultify_*_darwin_amd64` / `vaultify_*_darwin_arm64` | macOS bare CLI binaries |
-            | `vaultify_*_darwin_amd64.app.tar.gz` / `*_darwin_arm64.app.tar.gz` | macOS `Vaultify.app` bundle (extracts to `Vaultify.app` with native dock/Finder icon) |
-            | `vaultify_*_linux_amd64` / `vaultify_*_linux_arm64` | Linux bare CLI binaries |
-            | `Vaultify.icns` | Standalone macOS icon (drop into your own bundle) |
-            | `vaultify_*_linux-icons.tar.gz` | Linux hicolor PNG set + `vaultify.desktop` template (extract under `~/.local/share/icons/` and `~/.local/share/applications/`) |
-            | `SHA256SUMS` | SHA-256 hashes for the binaries and `Vaultify.icns` |
-            | `LICENSE` | MIT |
-
-            ### Verify checksums
-
-            Download `SHA256SUMS` next to your binary, then:
-
-            - **Linux:** `sha256sum -c SHA256SUMS --ignore-missing`
-            - **macOS:** `shasum -a 256 -c SHA256SUMS` (only if you downloaded every file listed in `SHA256SUMS`, or check one file: `shasum -a 256 vaultify_*` and compare to the file)
-            - **Windows (PowerShell):** `Get-FileHash .\vaultify_*_windows_amd64.exe -Algorithm SHA256` and compare to the line in `SHA256SUMS`
-
-            ### Install (recommended)
-
-            - **macOS / Linux:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash`
-            - **Windows (PowerShell):** `irm https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.ps1 | iex`
-
-            After install, open a new terminal and run `vaultify` from any directory.
-
-            ### Notes
-
-            - Run `./vaultify` (or `vaultify.exe` on Windows). The dashboard opens at `http://localhost:9471` by default.
-            - macOS binaries are **not** Apple-notarized; you may need to allow the app under **System Settings → Privacy & Security** the first time.
-            - 1Password integration requires the [1Password CLI](https://developer.1password.com/docs/cli) (`op`) where you use vault features.
+          generate_release_notes: false
+          body_path: /tmp/release_body.md
           files: |
             dist/vaultify_*
             dist/Vaultify.icns

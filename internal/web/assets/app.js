@@ -219,8 +219,9 @@ const App = {
       badge.style.color = 'var(--c-gold)';
     }
     const latest = info.latest || '?';
-    body.innerHTML = `<p style="margin:0 0 8px">You are running <strong>v${this.esc(info.current)}</strong>. <strong>v${this.esc(latest)}</strong> is available${info.released_at ? ` (released ${this.esc(info.released_at)})` : ''}.</p>
-      <p style="margin:0;color:var(--c-slate);font-size:.82rem">Re-run the install script to upgrade in place, then open a new terminal: macOS/Linux <code style="color:var(--c-cyan)">curl -fsSL …/install.sh | bash</code> · Windows <code style="color:var(--c-cyan)">irm …/install.ps1 | iex</code>. Or download the binary manually and replace your existing <code>vaultify</code> on PATH.</p>`;
+    const summary = info.release_notes_summary ? `<p style="margin:8px 0 0;color:var(--text);font-size:.84rem">${this.esc(info.release_notes_summary)}</p>` : '';
+    body.innerHTML = `<p style="margin:0 0 8px">You are running <strong>v${this.esc(info.current)}</strong>. <strong>v${this.esc(latest)}</strong> is available${info.released_at ? ` (released ${this.esc(info.released_at)})` : ''}.</p>${summary}
+      <p style="margin:8px 0 0;color:var(--c-slate);font-size:.82rem">See <strong>Version</strong> below for release notes. Re-run the install script to upgrade in place, then open a new terminal: macOS/Linux <code style="color:var(--c-cyan)">curl -fsSL …/install.sh | bash</code> · Windows <code style="color:var(--c-cyan)">irm …/install.ps1 | iex</code>.</p>`;
     if (btn) {
       btn.style.display = 'inline-flex';
       btn.textContent = `Download v${latest}`;
@@ -3326,71 +3327,60 @@ const App = {
     if (fnEl) fnEl.innerHTML = fns.map(f => `<span style="font-family:monospace;font-size:.75rem;padding:3px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--c-violet)">${this.esc(f)}</span>`).join('');
   },
 
-  releaseNotes: [
-    {
-      version: '0.3.0',
-      date: 'May 2026',
-      current: true,
-      changes: [
-        { type: 'new', text: 'Review: heuristic Status chip per row (likely fake / looks real / no live check / active / invalid / error) plus local checks for placeholders, demos, and low-entropy noise' },
-        { type: 'new', text: 'Active validation: per-row Check runs against the real provider from vaultify on your machine (not the browser); outcomes cached in SQLite by match hash without storing plaintext; audit trail; first-use consent per provider' },
-        { type: 'new', text: 'Validator coverage for common APIs (OpenAI, Anthropic, Gemini, Slack, GitHub classic and fine-grained PATs, Stripe, SendGrid); AWS pairing deferred' },
-        { type: 'new', text: 'Vee recommendations merge heuristics, validation, and severity into one suggested action per row with optional one-click adopt' },
-        { type: 'new', text: 'Bulk validation and “Apply & Secure Everything” playbook: stage Vee-aligned decisions for batch review before Apply' },
-        { type: 'new', text: 'Posture: validation status on rows, headline for credentials still present on disk, 30-day rolling history with drift and pruning' },
-        { type: 'new', text: 'Scheduled background re-validation for posture rows whose cache TTL expired' },
-        { type: 'new', text: 'Per-session cap on live validation calls with clear server messaging when the limit is reached' },
-        { type: 'new', text: 'SQLite-backed sessions (WAL, foreign keys) with one-shot import from legacy JSON stores' },
-        { type: 'new', text: 'Posture backfill replays historical sessions idempotently' },
-        { type: 'new', text: 'Activity view merges live server log stream and on-disk audit ledger' },
-        { type: 'new', text: 'Cross-platform shell assets: embedded Windows icon, macOS .app bundles, Linux hicolor set and desktop template' },
-        { type: 'new', text: 'tools/icogen builds .ico, .icns, and Linux PNG sets from one source image (stdlib only)' },
-        { type: 'new', text: 'Walkthrough covers Posture, Activity, vault selection, Review, and Apply' },
-        { type: 'new', text: 'Vee provider strip uses vendor artwork for each LLM backend' },
-        { type: 'perf', text: 'Faster posture merges via batched transactions and vault-reference auto-credit during scans' },
-        { type: 'fix', text: 'Reports remediation column counts good-practice junkyard actions and op:// references correctly' },
-        { type: 'fix', text: 'Clear banner when a scan stops at the configured file cap before navigating to Review' },
-        { type: 'new', text: 'Vee side panel can tuck off the right edge; slim rail restores it; preference saved locally for narrow displays' },
-        { type: 'fix', text: 'Version diagnostics trimmed to build metadata only' },
-      ]
+  _releaseNoteTypeColors: { new: 'var(--c-cyan)', fix: 'var(--c-success)', security: 'var(--c-violet)', perf: 'var(--c-rose)' },
+  _releaseNoteTypeLabels: { new: 'NEW', fix: 'FIX', security: 'SEC', perf: 'PERF' },
+
+  renderReleaseNotes(releases, currentVersion) {
+    const notesEl = document.getElementById('releaseNotes');
+    if (!notesEl) return;
+    if (!releases || !releases.length) {
+      notesEl.innerHTML = '<div class="card"><div class="empty-msg">Release notes unavailable — check your network or GitHub.</div></div>';
+      return;
     }
-  ],
+    const typeColors = this._releaseNoteTypeColors;
+    const typeLabels = this._releaseNoteTypeLabels;
+    notesEl.innerHTML = releases.map(r => {
+      const isCurrent = r.version === currentVersion;
+      let html = `<div class="card" style="margin-bottom:16px${isCurrent ? ';border-color:rgba(34,211,238,.25)' : ''}">`;
+      html += `<div class="card-title" style="justify-content:space-between"><span>v${this.esc(r.version)} ${isCurrent ? '<span class="badge" style="background:rgba(34,211,238,.12);color:var(--c-cyan)">Current</span>' : ''}</span><span style="font-size:.78rem;font-weight:400;color:var(--c-slate)">${this.esc(r.date || '')}</span></div>`;
+      if (r.summary) {
+        html += `<p style="margin:0 0 12px;font-size:.84rem;color:var(--c-slate);line-height:1.5">${this.esc(r.summary)}</p>`;
+      }
+      html += '<div style="display:flex;flex-direction:column;gap:6px">';
+      (r.changes || []).forEach(c => {
+        const tc = typeColors[c.type] || 'var(--c-slate)';
+        const tl = typeLabels[c.type] || (c.type || '').toUpperCase();
+        html += `<div style="display:flex;align-items:flex-start;gap:10px;font-size:.84rem;line-height:1.5">`;
+        html += `<span style="flex-shrink:0;font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:4px;background:${tc}18;color:${tc};margin-top:2px">${tl}</span>`;
+        html += `<span>${this.esc(c.text)}</span></div>`;
+      });
+      html += '</div></div>';
+      return html;
+    }).join('');
+  },
 
   async loadVersion() {
     try {
       const v = await (await fetch('/api/version')).json();
       if (typeof v.file_cap === 'number') this.state.file_cap = v.file_cap;
       if (v.edition) this.edition = String(v.edition).toLowerCase();
+      if (v.version) this.currentVersion = v.version;
       const el = document.getElementById('versionContent');
-      if (!el) return;
-      el.innerHTML = `<div style="font-size:.9rem;display:grid;grid-template-columns:140px 1fr;gap:8px 16px;padding:8px 0">
+      if (el) {
+        el.innerHTML = `<div style="font-size:.9rem;display:grid;grid-template-columns:140px 1fr;gap:8px 16px;padding:8px 0">
         <span style="color:var(--c-slate)">Version</span><span style="font-weight:700;color:var(--c-cyan)">${this.esc(v.version)}</span>
         <span style="color:var(--c-slate)">Build</span><span>${this.esc(v.build)}</span>
         <span style="color:var(--c-slate)">OS</span><span>${this.esc(v.os)}</span>
         <span style="color:var(--c-slate)">Architecture</span><span>${this.esc(v.arch)}</span>
       </div>`;
+      }
 
-      const notesEl = document.getElementById('releaseNotes');
-      if (!notesEl) return;
-      const typeColors = { 'new': 'var(--c-cyan)', 'fix': 'var(--c-success)', 'security': 'var(--c-violet)', 'perf': 'var(--c-rose)' };
-      const typeLabels = { 'new': 'NEW', 'fix': 'FIX', 'security': 'SEC', 'perf': 'PERF' };
-
-      notesEl.innerHTML = this.releaseNotes.map(r => {
-        const isCurrent = r.current;
-        let html = `<div class="card" style="margin-bottom:16px${isCurrent ? ';border-color:rgba(34,211,238,.25)' : ''}">`;
-        html += `<div class="card-title" style="justify-content:space-between"><span>v${this.esc(r.version)} ${isCurrent ? '<span class="badge" style="background:rgba(34,211,238,.12);color:var(--c-cyan)">Current</span>' : ''}</span><span style="font-size:.78rem;font-weight:400;color:var(--c-slate)">${this.esc(r.date)}</span></div>`;
-        html += '<div style="display:flex;flex-direction:column;gap:6px">';
-        r.changes.forEach(c => {
-          const tc = typeColors[c.type] || 'var(--c-slate)';
-          const tl = typeLabels[c.type] || c.type.toUpperCase();
-          html += `<div style="display:flex;align-items:flex-start;gap:10px;font-size:.84rem;line-height:1.5">`;
-          html += `<span style="flex-shrink:0;font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:4px;background:${tc}18;color:${tc};margin-top:2px">${tl}</span>`;
-          html += `<span>${this.esc(c.text)}</span>`;
-          html += `</div>`;
-        });
-        html += '</div></div>';
-        return html;
-      }).join('');
+      try {
+        const notes = await (await fetch('/api/version/notes')).json();
+        this.renderReleaseNotes(notes.releases || [], v.version);
+      } catch (_) {
+        this.renderReleaseNotes([], v.version);
+      }
 
       void this.checkForUpdates(false);
       this.renderUpgradeCard();

@@ -1,0 +1,27 @@
+{
+  "version": "0.3.0",
+  "date": "May 2026",
+  "summary": "Live validation, Vee recommendations, posture tracking, and SQLite-backed sessions.",
+  "changes": [
+    { "type": "new", "text": "Review: heuristic Status chip per row (likely fake / looks real / no live check / active / invalid / error) plus local checks for placeholders, demos, and low-entropy noise" },
+    { "type": "new", "text": "Active validation: per-row Check runs against the real provider from vaultify on your machine (not the browser); outcomes cached in SQLite by match hash without storing plaintext; audit trail; first-use consent per provider" },
+    { "type": "new", "text": "Validator coverage for common APIs (OpenAI, Anthropic, Gemini, Slack, GitHub classic and fine-grained PATs, Stripe, SendGrid); AWS pairing deferred" },
+    { "type": "new", "text": "Vee recommendations merge heuristics, validation, and severity into one suggested action per row with optional one-click adopt" },
+    { "type": "new", "text": "Bulk validation and Apply & Secure Everything playbook: stage Vee-aligned decisions for batch review before Apply" },
+    { "type": "new", "text": "Posture: validation status on rows, headline for credentials still present on disk, 30-day rolling history with drift and pruning" },
+    { "type": "new", "text": "Scheduled background re-validation for posture rows whose cache TTL expired" },
+    { "type": "new", "text": "Per-session cap on live validation calls with clear server messaging when the limit is reached" },
+    { "type": "new", "text": "SQLite-backed sessions (WAL, foreign keys) with one-shot import from legacy JSON stores" },
+    { "type": "new", "text": "Posture backfill replays historical sessions idempotently" },
+    { "type": "new", "text": "Activity view merges live server log stream and on-disk audit ledger" },
+    { "type": "new", "text": "Cross-platform shell assets: embedded Windows icon, macOS .app bundles, Linux hicolor set and desktop template" },
+    { "type": "new", "text": "tools/icogen builds .ico, .icns, and Linux PNG sets from one source image (stdlib only)" },
+    { "type": "new", "text": "Walkthrough covers Posture, Activity, vault selection, Review, and Apply" },
+    { "type": "new", "text": "Vee provider strip uses vendor artwork for each LLM backend" },
+    { "type": "perf", "text": "Faster posture merges via batched transactions and vault-reference auto-credit during scans" },
+    { "type": "fix", "text": "Reports remediation column counts good-practice junkyard actions and op:// references correctly" },
+    { "type": "fix", "text": "Clear banner when a scan stops at the configured file cap before navigating to Review" },
+    { "type": "new", "text": "Vee side panel can tuck off the right edge; slim rail restores it; preference saved locally for narrow displays" },
+    { "type": "fix", "text": "Version diagnostics trimmed to build metadata only" }
+  ]
+}

@@ -15,3 +15,10 @@ func (srv *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
 	res := versioncheck.Check(ctx, buildinfo.Version(), http.DefaultClient)
 	writeJSON(w, http.StatusOK, res)
 }
+
+func (srv *Server) handleVersionNotes(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	res := versioncheck.FetchReleaseNotes(ctx, buildinfo.Version(), http.DefaultClient)
+	writeJSON(w, http.StatusOK, res)
+}

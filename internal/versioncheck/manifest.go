@@ -29,18 +29,19 @@ type Manifest struct {
 
 // CheckResult is returned to the UI via /api/version/check.
 type CheckResult struct {
-	Current            string `json:"current"`
-	Latest             string `json:"latest"`
-	LatestPublished    string `json:"latest_published,omitempty"`
-	UpdateAvailable    bool   `json:"update_available"`
-	AheadOfPublished   bool   `json:"ahead_of_published,omitempty"`
-	ReleaseURL         string `json:"release_url,omitempty"`
-	DownloadURL        string `json:"download_url,omitempty"`
-	ReleasedAt         string `json:"released_at,omitempty"`
-	CheckedAt          string `json:"checked_at"`
-	Source             string `json:"source,omitempty"`
-	Repo               string `json:"repo,omitempty"`
-	Error              string `json:"error,omitempty"`
+	Current             string `json:"current"`
+	Latest              string `json:"latest"`
+	LatestPublished     string `json:"latest_published,omitempty"`
+	UpdateAvailable     bool   `json:"update_available"`
+	AheadOfPublished    bool   `json:"ahead_of_published,omitempty"`
+	ReleaseURL          string `json:"release_url,omitempty"`
+	DownloadURL         string `json:"download_url,omitempty"`
+	ReleasedAt          string `json:"released_at,omitempty"`
+	ReleaseNotesSummary string `json:"release_notes_summary,omitempty"`
+	CheckedAt           string `json:"checked_at"`
+	Source              string `json:"source,omitempty"`
+	Repo                string `json:"repo,omitempty"`
+	Error               string `json:"error,omitempty"`
 }
 
 type cachedManifest struct {
@@ -82,6 +83,10 @@ func normalizeManifest(m *Manifest) {
 	}
 	if m.ReleaseURL == "" && m.Version != "" {
 		m.ReleaseURL = "https://github.com/" + buildinfo.GitHubRepo + "/releases/tag/v" + strings.TrimPrefix(m.Version, "v")
+	}
+	if m.NotesURL == "" && m.Version != "" {
+		v := strings.TrimPrefix(strings.TrimSpace(m.Version), "v")
+		m.NotesURL = "https://raw.githubusercontent.com/" + buildinfo.GitHubRepo + "/main/releases/notes/" + v + ".json"
 	}
 }
 
@@ -232,6 +237,9 @@ func Check(ctx context.Context, current string, client *http.Client) CheckResult
 	res.ReleasedAt = m.ReleasedAt
 	res.ReleaseURL = m.ReleaseURL
 	res.DownloadURL = m.DownloadURL
+	if m.Version != "" {
+		res.ReleaseNotesSummary = SummaryForVersion(ctx, m.Version, client)
+	}
 	switch Compare(current, m.Version) {
 	case -1:
 		res.UpdateAvailable = true
