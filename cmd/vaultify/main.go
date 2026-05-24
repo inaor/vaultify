@@ -39,6 +39,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	if paths.MaybeReexecFromMacOSAppBundle(os.Args) {
+		return
+	}
+
+	paths.EnsureMacOSGUIPath()
+
 	url := fmt.Sprintf("http://localhost:%d", *port)
 
 	// Already running? Open and exit.
@@ -163,7 +169,7 @@ func main() {
 
 func printBanner(port int, rep paths.MigrationReport, dbInfo string) {
 	opInfo := "not installed"
-	if opPath, err := exec.LookPath("op"); err == nil {
+	if opPath, err := vault.ResolveOpPath(); err == nil {
 		opInfo = "found at " + opPath
 	}
 	fmt.Println()

@@ -28,7 +28,9 @@ func init() {
 type openaiValidator struct{}
 
 func (openaiValidator) ID() string         { return "openai" }
-func (openaiValidator) Patterns() []string { return []string{"openai_api_key", "OPENAI_API_KEY"} }
+func (openaiValidator) Patterns() []string {
+	return []string{"openai_project", "openai_legacy", "openai_api_key", "OPENAI_API_KEY"}
+}
 func (openaiValidator) TTL() time.Duration { return 24 * time.Hour }
 
 func (v openaiValidator) Validate(ctx context.Context, value string) (Result, error) {
@@ -51,7 +53,9 @@ func (v openaiValidator) Validate(ctx context.Context, value string) (Result, er
 type anthropicValidator struct{}
 
 func (anthropicValidator) ID() string         { return "anthropic" }
-func (anthropicValidator) Patterns() []string { return []string{"anthropic_api_key"} }
+func (anthropicValidator) Patterns() []string {
+	return []string{"anthropic_api", "anthropic_api_key", "ANTHROPIC_API_KEY"}
+}
 func (anthropicValidator) TTL() time.Duration { return 24 * time.Hour }
 
 func (v anthropicValidator) Validate(ctx context.Context, value string) (Result, error) {
@@ -77,7 +81,9 @@ func (v anthropicValidator) Validate(ctx context.Context, value string) (Result,
 type geminiValidator struct{}
 
 func (geminiValidator) ID() string         { return "gemini" }
-func (geminiValidator) Patterns() []string { return []string{"gemini_api_key"} }
+func (geminiValidator) Patterns() []string {
+	return []string{"google_api_key", "gemini_api_key", "GOOGLE_API_KEY"}
+}
 func (geminiValidator) TTL() time.Duration { return 24 * time.Hour }
 
 func (v geminiValidator) Validate(ctx context.Context, value string) (Result, error) {
@@ -215,7 +221,9 @@ func (v stripeValidator) Validate(ctx context.Context, value string) (Result, er
 type sendgridValidator struct{}
 
 func (sendgridValidator) ID() string         { return "sendgrid" }
-func (sendgridValidator) Patterns() []string { return []string{"sendgrid_api_key", "SENDGRID_API_KEY"} }
+func (sendgridValidator) Patterns() []string {
+	return []string{"sendgrid", "sendgrid_api_key", "SENDGRID_API_KEY"}
+}
 func (sendgridValidator) TTL() time.Duration { return 24 * time.Hour }
 
 func (v sendgridValidator) Validate(ctx context.Context, value string) (Result, error) {

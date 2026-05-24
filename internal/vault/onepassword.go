@@ -13,11 +13,11 @@ func (o *OnePasswordProvider) Name() string    { return "1Password" }
 func (o *OnePasswordProvider) CLIName() string { return "op" }
 
 func (o *OnePasswordProvider) Detect() (bool, string) {
-	path, err := exec.LookPath("op")
+	path, err := ResolveOpPath()
 	if err != nil || path == "" {
 		return false, ""
 	}
-	out, err := exec.Command("op", "--version").Output()
+	out, err := exec.Command(path, "--version").Output()
 	if err != nil {
 		return true, "unknown"
 	}

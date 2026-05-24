@@ -40,6 +40,9 @@ func ConfigDir() string { return filepath.Join(Root(), "config") }
 // SessionsDir returns the directory where per-scan session folders live.
 func SessionsDir() string { return filepath.Join(Root(), "sessions") }
 
+// WorkDir returns scratch space for temporary unpack jobs (archive scans).
+func WorkDir() string { return filepath.Join(Root(), "work") }
+
 // LogDir returns the directory where vaultify.log and audit.log live.
 func LogDir() string { return filepath.Join(Root(), "logs") }
 
@@ -52,10 +55,16 @@ func LogFile(name string) string { return filepath.Join(LogDir(), name) }
 // LegacyTempRoot returns the deprecated %TEMP%/vaultify-scans path.
 func LegacyTempRoot() string { return filepath.Join(os.TempDir(), "vaultify-scans") }
 
+// ExcludeFromScan returns directory prefixes that must never be walked during
+// filesystem scans (Vaultify's own state, sessions, logs, and scratch work).
+func ExcludeFromScan() []string {
+	return []string{Root(), LegacyTempRoot(), WorkDir()}
+}
+
 // Ensure creates every Vaultify directory with restrictive permissions.
 // Returns the first error encountered; callers should log but not fatal.
 func Ensure() error {
-	for _, d := range []string{Root(), ConfigDir(), SessionsDir(), LogDir()} {
+	for _, d := range []string{Root(), ConfigDir(), SessionsDir(), WorkDir(), LogDir()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return err
 		}

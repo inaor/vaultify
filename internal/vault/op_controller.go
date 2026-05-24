@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +48,8 @@ type OpSessionController struct {
 
 	vaultListJSON []byte
 	vaultListAt   time.Time
+	lastProbeHint string
+	lastProbeIssue OpProbeIssue
 
 	// opMu is the RW gate for op subprocess calls.
 	opMu sync.RWMutex
@@ -70,10 +71,21 @@ var (
 	opControllerInst *OpSessionController
 )
 
+// OpProbeIssue classifies why an op vault-list probe failed.
+type OpProbeIssue string
+
 const (
-	opReadSemSize       = 4
-	opSessionTTLSignIn  = 3 * time.Minute
-	opSessionTTLSignOut = 12 * time.Second
+	OpIssueNone                   OpProbeIssue = ""
+	OpIssueCLIIntegrationDisabled OpProbeIssue = "cli_integration_disabled"
+	OpIssueDesktopUnresponsive    OpProbeIssue = "desktop_unresponsive"
+	OpIssueTimeout                OpProbeIssue = "timeout"
+	OpIssueUnknown                OpProbeIssue = "unknown"
+)
+
+const (
+	opReadSemSize        = 4
+	opSessionTTLSignIn   = 3 * time.Minute
+	opSessionTTLSignOut  = 12 * time.Second
 	opVaultListCacheTTL2 = 2 * time.Minute
 )
 
@@ -111,6 +123,33 @@ func (c *OpSessionController) LastCheckAt() time.Time {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	return c.lastCheckAt
+}
+
+// LastProbeHint returns a user-facing hint from the most recent failed probe.
+func (c *OpSessionController) LastProbeHint() string {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.lastProbeHint
+}
+
+// LastProbeIssue returns a stable issue code for the most recent failed probe.
+func (c *OpSessionController) LastProbeIssue() OpProbeIssue {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.lastProbeIssue
+}
+
+func (c *OpSessionController) setLastProbeHint(hint string) {
+	c.stateMu.Lock()
+	c.lastProbeHint = hint
+	c.stateMu.Unlock()
+}
+
+func (c *OpSessionController) setLastProbeResult(hint string, issue OpProbeIssue) {
+	c.stateMu.Lock()
+	c.lastProbeHint = hint
+	c.lastProbeIssue = issue
+	c.stateMu.Unlock()
 }
 
 // InvalidateAuthCache resets state to Unknown and drops the vault-list
@@ -247,7 +286,7 @@ func (c *OpSessionController) ProbeAsync(force bool) {
 // mode and bail out fast instead of polling for ~13 minutes; in normal
 // path use of Probe(), nil is returned alongside SignedIn.
 func (c *OpSessionController) runProbeOnce(timeout time.Duration) (OpState, *OpError) {
-	if _, err := exec.LookPath("op"); err != nil {
+	if _, err := ResolveOpPath(); err != nil {
 		return OpStateSignedOut, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -255,6 +294,8 @@ func (c *OpSessionController) runProbeOnce(timeout time.Duration) (OpState, *OpE
 	out, opErr := c.RunRead(ctx, "vault list (probe)", []string{"vault", "list", "--format=json"}, timeout)
 	if opErr != nil || len(bytes.TrimSpace(out)) == 0 {
 		c.setVaultListCache(nil)
+		hint, issue := classifyOpProbeFailure(opErr)
+		c.setLastProbeResult(hint, issue)
 		// Map the queue-wait failure mode (where the read semaphore
 		// kept us waiting until the ctx already expired, so the op
 		// subprocess never ran) to the same `Timeout=true` shape the
@@ -267,8 +308,48 @@ func (c *OpSessionController) runProbeOnce(timeout time.Duration) (OpState, *OpE
 		}
 		return OpStateSignedOut, opErr
 	}
+	c.setLastProbeResult("", OpIssueNone)
 	c.setVaultListCache(out)
 	return OpStateSignedIn, nil
+}
+
+func classifyOpProbeFailure(opErr *OpError) (hint string, issue OpProbeIssue) {
+	if opErr == nil {
+		return "Unlock 1Password and ensure the CLI can access your account.", OpIssueUnknown
+	}
+	stderr := strings.ToLower(opErr.Stderr + " " + opErr.Error())
+	switch {
+	case strings.Contains(stderr, "no accounts configured"),
+		strings.Contains(stderr, "integrate with 1password cli"),
+		strings.Contains(stderr, "desktop app integration"):
+		return "Enable “Integrate with 1Password CLI” in 1Password → Settings → Developer, then authorize Vaultify when prompted.", OpIssueCLIIntegrationDisabled
+	case isDesktopUnresponsive(opErr):
+		return "1Password is open but the CLI cannot reach it. Check Developer → CLI activity and confirm integration is enabled.", OpIssueDesktopUnresponsive
+	case opErr.Timeout:
+		return "Timed out waiting for 1Password. Unlock the app and retry.", OpIssueTimeout
+	default:
+		if opErr.Stderr != "" {
+			return truncateOpHint(opErr.Stderr), OpIssueUnknown
+		}
+		return "Unlock 1Password and ensure the CLI can access your account.", OpIssueUnknown
+	}
+}
+
+// classifyOpProbeHint is kept for callers that only need the message string.
+func classifyOpProbeHint(opErr *OpError) string {
+	h, _ := classifyOpProbeFailure(opErr)
+	return h
+}
+
+func truncateOpHint(s string) string {
+	s = strings.TrimSpace(s)
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		s = strings.TrimSpace(s[:idx])
+	}
+	if len(s) > 180 {
+		return s[:180] + "…"
+	}
+	return s
 }
 
 // isDesktopUnresponsive reports whether an op probe failure looks like
@@ -391,7 +472,7 @@ func (c *OpSessionController) SigninActive() bool {
 // run in parallel up to opReadSemSize; readers wait for any in-flight
 // write to complete. Timeout bounds the subprocess.
 func (c *OpSessionController) RunRead(ctx context.Context, opName string, args []string, timeout time.Duration) ([]byte, *OpError) {
-	opPath, err := exec.LookPath("op")
+	opPath, err := ResolveOpPath()
 	if err != nil {
 		return nil, &OpError{Op: opName, Err: errors.New("op CLI not found")}
 	}
@@ -411,7 +492,7 @@ func (c *OpSessionController) RunRead(ctx context.Context, opName string, args [
 // RunWrite executes a write-style op subprocess call exclusively. No
 // readers and no other writers run concurrently.
 func (c *OpSessionController) RunWrite(ctx context.Context, opName string, args []string, timeout time.Duration) ([]byte, *OpError) {
-	opPath, err := exec.LookPath("op")
+	opPath, err := ResolveOpPath()
 	if err != nil {
 		return nil, &OpError{Op: opName, Err: errors.New("op CLI not found")}
 	}

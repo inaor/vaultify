@@ -49,12 +49,16 @@ var icnsEntries = []struct {
 	Type [4]byte
 	Size int
 }{
-	{[4]byte{'i', 'c', '1', '1'}, 32},   // 16@2x retina
-	{[4]byte{'i', 'c', '1', '2'}, 64},   // 32@2x retina
-	{[4]byte{'i', 'c', '0', '7'}, 128},  // 128
-	{[4]byte{'i', 'c', '0', '8'}, 256},  // 256
-	{[4]byte{'i', 'c', '0', '9'}, 512},  // 512
-	{[4]byte{'i', 'c', '1', '0'}, 1024}, // 1024 (512@2x)
+	// Match iconutil output: no 16/32/64 @1x legacy slots (ic04/icp4).
+	// Those tiny rasters get picked for auth dialogs and upscale badly.
+	{[4]byte{'i', 'c', '1', '1'}, 32},   // 16pt @2x
+	{[4]byte{'i', 'c', '1', '2'}, 64},   // 32pt @2x
+	{[4]byte{'i', 'c', '0', '7'}, 128},  // 128pt @1x
+	{[4]byte{'i', 'c', '1', '3'}, 256},  // 128pt @2x
+	{[4]byte{'i', 'c', '0', '8'}, 256},  // 256pt @1x
+	{[4]byte{'i', 'c', '1', '4'}, 512},  // 256pt @2x
+	{[4]byte{'i', 'c', '0', '9'}, 512},  // 512pt @1x
+	{[4]byte{'i', 'c', '1', '0'}, 1024}, // 512pt @2x
 }
 
 func main() {

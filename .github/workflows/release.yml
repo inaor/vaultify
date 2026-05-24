@@ -98,7 +98,11 @@ jobs:
           # Generate per-platform icon assets so the release ships the
           # same shell-level branding on macOS and Linux that Windows
           # gets via the embedded .syso resource.
-          go run ./tools/icogen -format icns    -in internal/web/assets/vaultify_logo.png -out dist/Vaultify.icns
+          if command -v iconutil >/dev/null && command -v sips >/dev/null; then
+            bash scripts/generate-macos-icon.sh internal/web/assets/vaultify_logo.png dist/Vaultify.icns
+          else
+            go run ./tools/icogen -format icns -in internal/web/assets/vaultify_logo.png -out dist/Vaultify.icns
+          fi
           go run ./tools/icogen -format png-set -in internal/web/assets/vaultify_logo.png -out dist/linux-icons
           ( cd dist && tar czf vaultify_${VERSION}_linux-icons.tar.gz linux-icons )
 
@@ -141,6 +145,37 @@ jobs:
           cat dist/SHA256SUMS
           ls -la dist
 
+      - name: Update releases/latest.json on main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${{ github.repository }}"
+          DATE="$(date -u +%Y-%m-%d)"
+          cat > /tmp/latest.json <<EOF
+          {
+            "schema": 1,
+            "version": "${VERSION}",
+            "released_at": "${DATE}",
+            "release_url": "https://github.com/${REPO}/releases/tag/${TAG}",
+            "download_url": "https://github.com/${REPO}/releases/latest",
+            "install_script_url": "https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh",
+            "install_script_windows_url": "https://raw.githubusercontent.com/${REPO}/main/scripts/install.ps1"
+          }
+          EOF
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          cp /tmp/latest.json releases/latest.json
+          git add releases/latest.json
+          git diff --staged --quiet && echo "releases/latest.json already up to date" && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: bump releases/latest.json to v${VERSION}"
+          git push origin main
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -168,6 +203,13 @@ jobs:
             - **Linux:** `sha256sum -c SHA256SUMS --ignore-missing`
             - **macOS:** `shasum -a 256 -c SHA256SUMS` (only if you downloaded every file listed in `SHA256SUMS`, or check one file: `shasum -a 256 vaultify_*` and compare to the file)
             - **Windows (PowerShell):** `Get-FileHash .\vaultify_*_windows_amd64.exe -Algorithm SHA256` and compare to the line in `SHA256SUMS`
+
+            ### Install (recommended)
+
+            - **macOS / Linux:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash`
+            - **Windows (PowerShell):** `irm https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.ps1 | iex`
+
+            After install, open a new terminal and run `vaultify` from any directory.
 
             ### Notes
 

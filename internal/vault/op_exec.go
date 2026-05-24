@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -68,6 +69,7 @@ func RunOp(ctx context.Context, opPath, opName string, args []string) ([]byte, *
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, opPath, args...)
+	cmd.Env = append(os.Environ(), "OP_BIOMETRIC_UNLOCK_ENABLED=true")
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()

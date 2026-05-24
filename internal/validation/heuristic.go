@@ -24,33 +24,6 @@ const (
 	StatusNotValidatable = "not_validatable"   // op:// ref, JWT shape, AWS temp creds, or no validator covers this pattern
 )
 
-// validatorIDByPattern maps a scanner pattern_id to the validator
-// registry key used by Slice B's active validators. An empty string
-// means "no live endpoint to test against" — the UI uses this to
-// disable the [Check] button on those rows.
-//
-// Keep this list aligned with the "provider coverage matrix" in the
-// design doc. Add new validator IDs here BEFORE registering the Go
-// validator in Slice B so the UI surfaces them consistently.
-var validatorIDByPattern = map[string]string{
-	"openai_api_key":     "openai",
-	"OPENAI_API_KEY":     "openai", // legacy CTX-detected variant
-	"anthropic_api_key":  "anthropic",
-	"slack_bot_token":    "slack",
-	"slack_user_token":   "slack",
-	"github_pat":         "github",
-	"github_oauth":       "github",
-	"gh_pat_fine":        "github",
-	"stripe_secret_key":  "stripe",
-	"aws_access_key_id":  "aws",
-	"gemini_api_key":     "gemini",
-	"sendgrid_api_key":   "sendgrid",
-	// vault_ref / op_secret_ref / jwt / aws_temp_access_key_id are
-	// intentionally NOT validatable via a third-party endpoint; they
-	// resolve to "" below and the heuristic short-circuits to
-	// StatusNotValidatable for them.
-}
-
 // Classify turns a single Finding into (heuristic_status, validator_id).
 // Pure function: no I/O, safe to call from any goroutine.
 //
@@ -60,7 +33,7 @@ var validatorIDByPattern = map[string]string{
 // reported StatusFake on the live value. That's an acceptable degradation
 // because heuristics are recomputed on every fresh scan.
 func Classify(f scanner.Finding) (status string, validatorID string) {
-	validatorID = validatorIDByPattern[f.PatternID]
+	validatorID = ValidatorIDForPattern(f.PatternID)
 
 	// 1. Always-good-practice patterns short-circuit. The op:// reference
 	//    is already in the vault by definition; flagging it as anything
@@ -131,6 +104,7 @@ var (
 		"changeme", "change_me", "change-me", "fake", "demo", "dummy",
 		"sample", "todo", "fixme", "test_test", "test-test",
 		"replaceme", "replace_me", "replace-me", "<your", "...",
+		"vaultify_demo",
 	}
 
 	// Canonical SDK / docs fixtures. These ARE valid-shape keys but the
@@ -232,23 +206,21 @@ func lengthScore(patternID string, n int) float64 {
 
 func canonicalLength(patternID string) (low, high int, ok bool) {
 	switch patternID {
-	case "openai_api_key", "OPENAI_API_KEY":
-		return 40, 200, true // sk-... and sk-proj-... are quite long
-	case "anthropic_api_key":
+	case "openai_api_key", "OPENAI_API_KEY", "openai_project", "openai_legacy":
+		return 40, 200, true
+	case "anthropic_api_key", "ANTHROPIC_API_KEY", "anthropic_api":
 		return 60, 120, true
-	case "slack_bot_token", "slack_user_token":
+	case "slack_bot_token", "slack_user_token", "slack_bot", "slack_user", "slack_app":
 		return 50, 100, true
-	case "github_pat", "github_oauth":
-		return 36, 100, true
-	case "gh_pat_fine":
-		return 80, 120, true
-	case "stripe_secret_key":
+	case "github_pat", "github_oauth", "gh_pat_classic", "gh_pat_fine", "github_app":
+		return 36, 120, true
+	case "stripe_secret_key", "stripe_secret":
 		return 30, 120, true
-	case "aws_access_key_id":
+	case "aws_access_key_id", "AWS_ACCESS_KEY_ID":
 		return 16, 24, true
-	case "gemini_api_key":
+	case "gemini_api_key", "google_api_key", "GOOGLE_API_KEY":
 		return 30, 60, true
-	case "sendgrid_api_key":
+	case "sendgrid_api_key", "sendgrid", "SENDGRID_API_KEY":
 		return 60, 80, true
 	}
 	return 0, 0, false

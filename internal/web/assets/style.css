@@ -57,6 +57,23 @@ a:hover { text-decoration: underline; }
 .sidebar .brand-mark { width: 44px; height: 44px; flex-shrink: 0; object-fit: contain; border-radius: 12px; box-shadow: 0 0 0 1px rgba(56,189,248,.1); }
 .sidebar .brand-text { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.03em; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1; }
 .sidebar .brand-version { color: var(--muted); font-weight: 500; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
+.upgrade-pill {
+  appearance: none;
+  border: 1px solid rgba(245, 158, 11, .45);
+  background: rgba(245, 158, 11, .12);
+  color: var(--c-gold);
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.upgrade-pill:hover { background: rgba(245, 158, 11, .22); border-color: rgba(245, 158, 11, .65); }
+.upgrade-nav-badge { background: rgba(245, 158, 11, .18); color: var(--c-gold); margin-left: 4px; }
 
 /* ---- Logs tab ---- */
 .logs-live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: auto; transition: background .2s, box-shadow .2s; }

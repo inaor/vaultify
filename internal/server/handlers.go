@@ -18,9 +18,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vaultify/vaultify/internal/archive"
 	"github.com/vaultify/vaultify/internal/buildinfo"
 	"github.com/vaultify/vaultify/internal/db"
 	"github.com/vaultify/vaultify/internal/exclusions"
+	"github.com/vaultify/vaultify/internal/inventory"
+	"github.com/vaultify/vaultify/internal/paths"
 	"github.com/vaultify/vaultify/internal/scanner"
 	"github.com/vaultify/vaultify/internal/session"
 	"github.com/vaultify/vaultify/internal/validation"
@@ -33,6 +36,10 @@ import (
 
 type scanStartRequest struct {
 	Roots []string `json:"roots"`
+}
+
+type archiveScanRequest struct {
+	ArchivePath string `json:"archive_path"`
 }
 
 type scanStartResponse struct {
@@ -102,6 +109,7 @@ type scanState struct {
 	Progress       int               `json:"progress"`
 	Total          int               `json:"total"`
 	Findings       []scanner.Finding `json:"findings"`
+	DevInventory   []inventory.Item  `json:"dev_inventory"`
 	ScanType       string            `json:"scan_type"`
 	LastScanCapped bool              `json:"-"`
 	cancel         context.CancelFunc
@@ -116,26 +124,32 @@ func (s *scanState) snapshot() any {
 		safe[i].Value = ""
 	}
 	cap := buildinfo.FileCapForAPI()
+	inv := make([]inventory.Item, len(s.DevInventory))
+	copy(inv, s.DevInventory)
 	return struct {
-		Running    bool              `json:"running"`
-		SessionID  string            `json:"sessionId"`
-		Progress   int               `json:"progress"`
-		Total      int               `json:"total"`
-		Findings   []scanner.Finding `json:"findings"`
-		ScanType   string            `json:"scan_type,omitempty"`
-		Edition    string            `json:"edition"`
-		FileCap    int               `json:"file_cap"`
-		ScanCapped bool              `json:"scan_capped"`
+		Running         bool              `json:"running"`
+		SessionID       string            `json:"sessionId"`
+		Progress        int               `json:"progress"`
+		Total           int               `json:"total"`
+		Findings        []scanner.Finding `json:"findings"`
+		DevInventory    []inventory.Item  `json:"dev_inventory,omitempty"`
+		DevInventoryCnt int               `json:"dev_inventory_count"`
+		ScanType        string            `json:"scan_type,omitempty"`
+		Edition         string            `json:"edition"`
+		FileCap         int               `json:"file_cap"`
+		ScanCapped      bool              `json:"scan_capped"`
 	}{
-		Running:    s.Running,
-		SessionID:  s.SessionID,
-		Progress:   s.Progress,
-		Total:      s.Total,
-		Findings:   safe,
-		ScanType:   s.ScanType,
-		Edition:    buildinfo.Edition(),
-		FileCap:    cap,
-		ScanCapped: s.LastScanCapped,
+		Running:         s.Running,
+		SessionID:       s.SessionID,
+		Progress:        s.Progress,
+		Total:           s.Total,
+		Findings:        safe,
+		DevInventory:    inv,
+		DevInventoryCnt: len(inv),
+		ScanType:        s.ScanType,
+		Edition:         buildinfo.Edition(),
+		FileCap:         cap,
+		ScanCapped:      s.LastScanCapped,
 	}
 }
 
@@ -184,6 +198,7 @@ func (srv *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 	srv.state.Progress = 0
 	srv.state.Total = 0
 	srv.state.Findings = nil
+	srv.state.DevInventory = nil
 	srv.state.ScanType = scanType
 	srv.state.LastScanCapped = false
 	srv.state.cancel = cancel
@@ -194,6 +209,57 @@ func (srv *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 	srv.addSessionAudit("scan_started", fmt.Sprintf("type=%s roots=%v", scanType, req.Roots), sid)
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"sessionId": sid, "scan_type": scanType})
+}
+
+func (srv *Server) handleScanArchive(w http.ResponseWriter, r *http.Request) {
+	var req archiveScanRequest
+	if err := readRequestJSON(r, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
+		return
+	}
+	archivePath := strings.TrimSpace(req.ArchivePath)
+	if archivePath == "" {
+		httpError(w, http.StatusBadRequest, "archive_path is required")
+		return
+	}
+	info, err := os.Stat(archivePath)
+	if err != nil || info.IsDir() {
+		httpError(w, http.StatusBadRequest, "archive file not found or not readable")
+		return
+	}
+	if !archive.IsSupported(archivePath) {
+		httpError(w, http.StatusBadRequest, "unsupported archive format (use .zip)")
+		return
+	}
+
+	srv.state.mu.Lock()
+	if srv.state.Running {
+		srv.state.mu.Unlock()
+		httpError(w, http.StatusConflict, "scan already running")
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sid := session.NewID()
+	srv.state.Running = true
+	srv.state.SessionID = sid
+	srv.state.Progress = 0
+	srv.state.Total = 0
+	srv.state.Findings = nil
+	srv.state.DevInventory = nil
+	srv.state.ScanType = "archive"
+	srv.state.LastScanCapped = false
+	srv.state.cancel = cancel
+	srv.state.mu.Unlock()
+
+	go srv.runArchiveScan(ctx, sid, archivePath)
+	srv.addSessionAudit("scan_started", fmt.Sprintf("type=archive path=%s", archivePath), sid)
+
+	writeJSON(w, http.StatusAccepted, map[string]string{"sessionId": sid, "scan_type": "archive"})
 }
 
 func (srv *Server) handleScanStop(w http.ResponseWriter, r *http.Request) {
@@ -419,15 +485,18 @@ func (srv *Server) handleVaults(w http.ResponseWriter, r *http.Request) {
 		{Name: "Doppler", CLI: "doppler", DocsURL: "https://docs.doppler.com/docs/install-cli"},
 	}
 	for i := range vaults {
-		_, err := exec.LookPath(vaults[i].CLI)
-		vaults[i].Installed = err == nil
+		if vaults[i].CLI == "op" {
+			vaults[i].Installed = vault.OpInstalled()
+		} else {
+			_, err := exec.LookPath(vaults[i].CLI)
+			vaults[i].Installed = err == nil
+		}
 	}
 	writeJSON(w, http.StatusOK, vaults)
 }
 
 func (srv *Server) handleInstallOp(w http.ResponseWriter, r *http.Request) {
-	_, err := exec.LookPath("op")
-	if err == nil {
+	if vault.OpInstalled() {
 		writeJSON(w, http.StatusOK, map[string]bool{"installed": true})
 		return
 	}
@@ -443,8 +512,8 @@ func (srv *Server) handleInstallOp(w http.ResponseWriter, r *http.Request) {
 		log.Printf("op install: %v\n%s", err, out)
 	}
 
-	_, checkErr := exec.LookPath("op")
-	installed := checkErr == nil
+	vault.ResetOpPathCache()
+	installed := vault.OpInstalled()
 	srv.addAuditEntry("op_cli_install", fmt.Sprintf("installed=%v", installed))
 	writeJSON(w, http.StatusOK, map[string]bool{"installed": installed})
 }
@@ -586,6 +655,7 @@ func (srv *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		ef.VeeRecommendation = &rec
 		enriched[i] = ef
 	}
+	devInv, _ := session.LoadDevInventory(srv.sessions.Dir(id))
 	out := struct {
 		ID                    string            `json:"id"`
 		Status                string            `json:"status"`
@@ -593,6 +663,8 @@ func (srv *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		FindingsCount         int               `json:"findings_count"`
 		OriginalFindingsCount int               `json:"original_findings_count"`
 		Findings              []enrichedFinding `json:"findings"`
+		DevInventory          []inventory.Item  `json:"dev_inventory,omitempty"`
+		DevInventoryCount     int               `json:"dev_inventory_count"`
 	}{
 		ID:                    s.ID,
 		Status:                s.Status,
@@ -600,6 +672,8 @@ func (srv *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		FindingsCount:         s.FindingsCount,
 		OriginalFindingsCount: s.OriginalFindingsCount,
 		Findings:              enriched,
+		DevInventory:          devInv,
+		DevInventoryCount:     len(devInv),
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -737,6 +811,38 @@ func (srv *Server) handleExclusionsRemove(w http.ResponseWriter, r *http.Request
 // Background scan runner
 // ------------------------------------------------------------------
 
+func (srv *Server) runArchiveScan(ctx context.Context, sessionID, archivePath string) {
+	workRoot := filepath.Join(paths.WorkDir(), "archive-"+sessionID)
+	_ = os.RemoveAll(workRoot)
+
+	fail := func(msg string) {
+		log.Printf("archive scan: %s", msg)
+		srv.logger.Error("archive_scan_error", fmt.Sprintf("session=%s err=%s", sessionID, msg))
+		srv.state.mu.Lock()
+		srv.state.Running = false
+		srv.state.mu.Unlock()
+		srv.hub.Broadcast(map[string]any{
+			"type":      "scan_complete",
+			"sessionId": sessionID,
+			"scan_type": "archive",
+			"error":     msg,
+		})
+	}
+
+	manifest, err := archive.ExtractZip(archivePath, workRoot, archive.DefaultLimits())
+	if err != nil {
+		fail(err.Error())
+		_ = os.RemoveAll(workRoot)
+		return
+	}
+	srv.addSessionAudit("archive_extracted",
+		fmt.Sprintf("files=%d bytes=%d archive=%s", manifest.FilesExtracted, manifest.BytesExtracted, archivePath),
+		sessionID)
+
+	srv.runScan(ctx, sessionID, []string{workRoot})
+	_ = os.RemoveAll(workRoot)
+}
+
 func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string) {
 	_ = srv.exclusions.Load()
 	scanCapped := false
@@ -747,13 +853,17 @@ func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string
 		srv.state.mu.Lock()
 		st := srv.state.ScanType
 		srv.state.mu.Unlock()
+		srv.state.mu.Lock()
+		invCnt := len(srv.state.DevInventory)
+		srv.state.mu.Unlock()
 		srv.hub.Broadcast(map[string]any{
-			"type":        "scan_complete",
-			"sessionId":   sessionID,
-			"scan_type":   st,
-			"scan_capped": scanCapped,
-			"file_cap":    buildinfo.FileCapForAPI(),
-			"edition":     buildinfo.Edition(),
+			"type":                  "scan_complete",
+			"sessionId":             sessionID,
+			"scan_type":             st,
+			"scan_capped":           scanCapped,
+			"file_cap":              buildinfo.FileCapForAPI(),
+			"edition":               buildinfo.Edition(),
+			"dev_inventory_count":   invCnt,
 		})
 	}()
 
@@ -822,6 +932,19 @@ func (srv *Server) runScan(ctx context.Context, sessionID string, roots []string
 	if err := srv.sessions.Save(sessionID, savedFindings, time.Now()); err != nil {
 		log.Printf("save session: %v", err)
 		srv.logger.Error("session_save_error", fmt.Sprintf("session=%s err=%v", sessionID, err))
+	}
+
+	devItems, invErr := inventory.Collect(ctx, roots)
+	if invErr != nil && ctx.Err() == nil {
+		log.Printf("dev inventory: %v", invErr)
+		srv.logger.Error("dev_inventory_error", fmt.Sprintf("session=%s err=%v", sessionID, invErr))
+	}
+	srv.state.mu.Lock()
+	srv.state.DevInventory = devItems
+	srv.state.mu.Unlock()
+	if err := session.SaveDevInventory(srv.sessions.Dir(sessionID), devItems); err != nil {
+		log.Printf("save dev inventory: %v", err)
+		srv.logger.Error("dev_inventory_save_error", fmt.Sprintf("session=%s err=%v", sessionID, err))
 	}
 
 	// Auto-credit "good practice" findings as remediated. op:// inject
@@ -956,7 +1079,9 @@ func (srv *Server) handleVaultAuthStatus(w http.ResponseWriter, r *http.Request)
 		}
 		ctrl := vault.OpController()
 		if force {
-			ctrl.ProbeAsync(true)
+			ctx, cancel := context.WithTimeout(r.Context(), vault.OpVaultListProbeTimeout()+3*time.Second)
+			defer cancel()
+			_ = ctrl.Probe(ctx, true)
 		} else if ctrl.State() == vault.OpStateUnknown {
 			ctrl.ProbeAsync(false)
 		}
@@ -967,6 +1092,10 @@ func (srv *Server) handleVaultAuthStatus(w http.ResponseWriter, r *http.Request)
 			"onepassword_signed_in": connected,
 			"state":                 string(ctrl.State()),
 			"signin_active":         ctrl.SigninActive(),
+			"hint":                  ctrl.LastProbeHint(),
+			"issue":                 string(ctrl.LastProbeIssue()),
+			"op_settings_url":       vault.OnePasswordDeveloperSettingsURL(),
+			"macos_app_bundle":      paths.RunningFromMacOSAppBundle(),
 		})
 		return
 	}
@@ -983,6 +1112,18 @@ func (srv *Server) handleVaultAuthStatus(w http.ResponseWriter, r *http.Request)
 			return "signed_out"
 		}(),
 		"signin_active": false,
+	})
+}
+
+func (srv *Server) handleOpenOpDeveloperSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	vault.OpenOnePasswordDeveloperSettings()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"opened": true,
+		"url":    vault.OnePasswordDeveloperSettingsURL(),
 	})
 }
 

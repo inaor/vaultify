@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -450,7 +449,7 @@ func (srv *Server) handleVeeProviders(w http.ResponseWriter, r *http.Request) {
 	checkVault := r.URL.Query().Get("check") == "1"
 	attemptedCheck := false
 	if checkVault && srv.activeBackend().SupportsVeeCredentialStore() {
-		if opPath, err := exec.LookPath("op"); err == nil {
+		if opPath, err := vault.ResolveOpPath(); err == nil {
 			attemptedCheck = true
 			slots := vault.VeeProviderKeyScan(opPath, vaultName)
 			for i := range providers {

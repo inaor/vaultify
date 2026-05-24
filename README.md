@@ -25,20 +25,34 @@ https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69
 
 ## Quick Start
 
-**Releases:** pre-built binaries (Windows, macOS Intel/ARM, Linux x86_64/ARM64), `SHA256SUMS`, and `LICENSE` are attached to each [GitHub Release](https://github.com/inaor/vaultify/releases). Pick the asset that matches your OS and architecture, e.g. `vaultify_0.3.0_linux_amd64`. Verify with `SHA256SUMS` (see the release notes).
+Install once, then run **`vaultify`** from any directory:
+
+**macOS / Linux**
 
 ```bash
-# Example (Linux / macOS) — make executable if needed
-chmod +x ./vaultify_0.3.0_linux_amd64
-./vaultify_0.3.0_linux_amd64
+curl -fsSL https://raw.githubusercontent.com/securityjoes/vaultify/main/scripts/install.sh | bash
 ```
 
-- On Windows, run the `.exe`; 
-- On MacOs unpack the `.app` 
-- The dashboard should open at `http://localhost:9471` by default.
+The script downloads the latest release, installs the binary as `~/.local/bin/vaultify`, and adds that directory to your shell `PATH` if needed. Open a new terminal and run:
 
-That's it. Click **Start Scan** or **Specific Folder**, then in the generated report choose how to secure your secrets - **Vaultify**, **Remove** or **Junk**.
-review findings, make decisions, apply.
+```bash
+vaultify
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/securityjoes/vaultify/main/scripts/install.ps1 | iex
+```
+
+Then open a new terminal and run `vaultify`.
+
+**Manual download:** pre-built binaries (Windows, macOS Intel/ARM, Linux x86_64/ARM64), `SHA256SUMS`, and `LICENSE` are on each [GitHub Release](https://github.com/securityjoes/vaultify/releases). Rename the binary to `vaultify` (or `vaultify.exe`), put it on your `PATH`, and run it from anywhere.
+
+- The dashboard opens at `http://localhost:9471` by default.
+- macOS users can also use the `.app.tar.gz` bundle from the release page; the install script above is the simplest way to get a global `vaultify` command.
+
+That's it. Click **Start Scan** or **Specific Folder**, then in the generated report choose how to secure your secrets — **Vaultify**, **Remove**, or **Junk**.
 
 <img width="848" height="824" alt="Untitled" src="https://github.com/user-attachments/assets/274e191c-af17-40e8-9fbf-9a228eccff5a" />
 

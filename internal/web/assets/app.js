@@ -11,7 +11,7 @@ const App = {
   ws: null,
   /** Server-driven: 0 = unlimited scan depth, else max eligible files per scan. */
   edition: 'open',
-  state: { status: 'idle', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: 10000, pattern_totals: [], findings: [] },
+  state: { status: 'idle', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: 10000, pattern_totals: [], findings: [], dev_inventory: [] },
   decisions: {},
   reviewSubTab: 'active',
   reviewSort: { col: 'severity', dir: -1 },
@@ -30,6 +30,7 @@ const App = {
     this._loadSelectedVaultProvider();
     void this.loadEditionInfo();
     this._setupOpSessionSync();
+    this._setupVaultAuthVisibilityRefresh();
     this.connectWebSocket();
     this.setupNavigation();
     this.navigate(window.location.hash.slice(1) || 'dashboard');
@@ -43,13 +44,15 @@ const App = {
   },
 
   /** Persisted: Vee side panel tucked off-screen so Review uses full width. */
-  veePanelCollapsed: false,
+  veePanelCollapsed: true,
 
   _initVeePanelLayout() {
     try {
-      this.veePanelCollapsed = localStorage.getItem('vaultify_vee_panel_collapsed') === '1';
+      const stored = localStorage.getItem('vaultify_vee_panel_collapsed');
+      // Absent key or '1' → collapsed (default for new sessions). Only '0' means user left it open.
+      this.veePanelCollapsed = stored !== '0';
     } catch (_) {
-      this.veePanelCollapsed = false;
+      this.veePanelCollapsed = true;
     }
     this._applyVeePanelCollapsedClass();
   },
@@ -66,6 +69,10 @@ const App = {
     document.body.classList.toggle('vee-collapsed', this.veePanelCollapsed);
     const panel = document.getElementById('veePanel');
     if (panel) panel.setAttribute('aria-hidden', this.veePanelCollapsed ? 'true' : 'false');
+    const collapseBtn = document.getElementById('veeCollapseBtn');
+    const railBtn = document.getElementById('veeRailBtn');
+    if (collapseBtn) collapseBtn.setAttribute('aria-expanded', this.veePanelCollapsed ? 'false' : 'true');
+    if (railBtn) railBtn.setAttribute('aria-expanded', this.veePanelCollapsed ? 'false' : 'true');
   },
 
   toggleVeePanel() {
@@ -90,7 +97,144 @@ const App = {
         this.updateFooters();
       }
       this.updateDashboard();
+      void this.checkForUpdates(false);
     } catch (e) {}
+  },
+
+  upgradeInfo: null,
+
+  _upgradeCacheKey: 'vaultify_upgrade_check_v2',
+
+  _readUpgradeCache() {
+    try {
+      const raw = localStorage.getItem(this._upgradeCacheKey);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || !data.checked_at || data.error) return null;
+      const age = Date.now() - Date.parse(data.checked_at);
+      if (Number.isNaN(age) || age > 24 * 60 * 60 * 1000) return null;
+      return data;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  _writeUpgradeCache(info) {
+    try {
+      if (!info || info.error) {
+        localStorage.removeItem(this._upgradeCacheKey);
+        localStorage.removeItem('vaultify_upgrade_check');
+        return;
+      }
+      localStorage.setItem(this._upgradeCacheKey, JSON.stringify(info));
+    } catch (e) {}
+  },
+
+  async checkForUpdates(force = false) {
+    try {
+      if (!force) {
+        const cached = this._readUpgradeCache();
+        if (cached) {
+          this._applyUpgradeUI(cached);
+          return cached;
+        }
+      } else {
+        try {
+          localStorage.removeItem(this._upgradeCacheKey);
+          localStorage.removeItem('vaultify_upgrade_check');
+        } catch (e) {}
+      }
+      const info = await (await fetch('/api/version/check')).json();
+      this._writeUpgradeCache(info);
+      this._applyUpgradeUI(info);
+      return info;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  _applyUpgradeUI(info) {
+    if (!info) return;
+    this.upgradeInfo = info;
+    const show = !!info.update_available;
+    const pill = document.getElementById('upgradePill');
+    if (pill) pill.style.display = show ? 'inline-flex' : 'none';
+    const navBadge = document.getElementById('navUpgradeBadge');
+    if (navBadge) navBadge.style.display = show ? 'inline' : 'none';
+    this.renderUpgradeCard();
+  },
+
+  renderUpgradeCard() {
+    const card = document.getElementById('upgradeCard');
+    const body = document.getElementById('upgradeCardBody');
+    const badge = document.getElementById('upgradeStatusBadge');
+    const btn = document.getElementById('btnUpgradeDownload');
+    const info = this.upgradeInfo;
+    if (!card || !body) return;
+    if (!info) {
+      card.style.display = 'none';
+      return;
+    }
+    if (info.error && !info.update_available && !info.ahead_of_published) {
+      card.style.display = 'block';
+      if (badge) {
+        badge.textContent = 'Check failed';
+        badge.style.background = 'rgba(148,163,184,.12)';
+        badge.style.color = 'var(--c-slate)';
+      }
+      const repo = info.repo || 'securityjoes/vaultify';
+      body.innerHTML = `<p style="margin:0 0 8px">Running <strong>v${this.esc(info.current || this.currentVersion || '?')}</strong>. Could not check <a href="https://github.com/${this.esc(repo)}/releases" target="_blank" rel="noopener noreferrer" style="color:var(--c-cyan)">${this.esc(repo)}</a> for updates.</p>
+        <p style="margin:0;color:var(--c-slate);font-size:.82rem">${this.esc(info.error)}</p>`;
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    if (info.ahead_of_published) {
+      card.style.display = 'block';
+      if (badge) {
+        badge.textContent = 'Pre-release';
+        badge.style.background = 'rgba(34,211,238,.12)';
+        badge.style.color = 'var(--c-cyan)';
+      }
+      body.innerHTML = `<p style="margin:0">You are running <strong>v${this.esc(info.current)}</strong>, which is newer than the latest published release (<strong>v${this.esc(info.latest_published || info.latest)}</strong> on GitHub).</p>
+        <p style="margin:8px 0 0;color:var(--c-slate);font-size:.82rem">Last checked ${this.esc(info.checked_at || '')} · source: ${this.esc(info.source || '')}</p>`;
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    if (!info.update_available) {
+      card.style.display = 'block';
+      if (badge) {
+        badge.textContent = 'Up to date';
+        badge.style.background = 'rgba(74,222,128,.12)';
+        badge.style.color = 'var(--c-success)';
+      }
+      body.innerHTML = `<p style="margin:0">You are on the latest release (<strong>v${this.esc(info.current)}</strong>).</p>
+        <p style="margin:8px 0 0;color:var(--c-slate);font-size:.82rem">Last checked ${this.esc(info.checked_at || '')}</p>`;
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    card.style.display = 'block';
+    if (badge) {
+      badge.textContent = 'Update available';
+      badge.style.background = 'rgba(245,158,11,.15)';
+      badge.style.color = 'var(--c-gold)';
+    }
+    const latest = info.latest || '?';
+    body.innerHTML = `<p style="margin:0 0 8px">You are running <strong>v${this.esc(info.current)}</strong>. <strong>v${this.esc(latest)}</strong> is available${info.released_at ? ` (released ${this.esc(info.released_at)})` : ''}.</p>
+      <p style="margin:0;color:var(--c-slate);font-size:.82rem">Re-run the install script to upgrade in place, then open a new terminal: macOS/Linux <code style="color:var(--c-cyan)">curl -fsSL …/install.sh | bash</code> · Windows <code style="color:var(--c-cyan)">irm …/install.ps1 | iex</code>. Or download the binary manually and replace your existing <code>vaultify</code> on PATH.</p>`;
+    if (btn) {
+      btn.style.display = 'inline-flex';
+      btn.textContent = `Download v${latest}`;
+    }
+  },
+
+  openUpgradePage() {
+    this.navigate('version');
+    void this.checkForUpdates(true);
+  },
+
+  openUpgradeDownload() {
+    const url = (this.upgradeInfo && (this.upgradeInfo.download_url || this.upgradeInfo.release_url)) || 'https://github.com/securityjoes/vaultify/releases/latest';
+    window.open(url, '_blank', 'noopener,noreferrer');
   },
 
   fileCapLabel() {
@@ -192,9 +336,44 @@ const App = {
     } catch (e) {}
   },
 
+  opAuthHint: '',
+  opAuthIssue: '',
+  macosAppBundle: true,
+
   // Retained as no-ops; unlock detection is now WS-driven.
-  _clearVaultAuthPoll() {},
-  _syncVaultAuthPoll() {},
+  _vaultAuthPollTimer: null,
+
+  _clearVaultAuthPoll() {
+    if (this._vaultAuthPollTimer) {
+      clearInterval(this._vaultAuthPollTimer);
+      this._vaultAuthPollTimer = null;
+    }
+  },
+
+  _syncVaultAuthPoll() {
+    this._clearVaultAuthPoll();
+    const op = (this.vaultList || []).find(v => v.cli === 'op');
+    if (!op || !op.installed || this.selectedVaultProvider !== 'op' || this.opSignedIn) return;
+    this._vaultAuthPollTimer = setInterval(() => {
+      if (this.opSignedIn) {
+        this._clearVaultAuthPoll();
+        return;
+      }
+      void this.refreshVaultAuthUI(true);
+    }, 8000);
+  },
+
+  _setupVaultAuthVisibilityRefresh() {
+    if (this._vaultAuthVisBound) return;
+    this._vaultAuthVisBound = true;
+    const recheck = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (this.selectedVaultProvider !== 'op' || this.opSignedIn) return;
+      void this.refreshVaultAuthUI(true);
+    };
+    document.addEventListener('visibilitychange', recheck);
+    window.addEventListener('focus', recheck);
+  },
 
   connectWebSocket() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -209,6 +388,8 @@ const App = {
       const s = await (await fetch('/api/scan/state')).json();
       if (typeof s.file_cap === 'number') this.state.file_cap = s.file_cap;
       if (s.edition) this.edition = String(s.edition).toLowerCase();
+      if (Array.isArray(s.dev_inventory)) this.state.dev_inventory = s.dev_inventory;
+      this.renderDevInventory();
       if (!s.running && this.state.status === 'running') {
         this.state.status = 'complete';
         this.state.current_path = '';
@@ -244,6 +425,16 @@ const App = {
         }
         break;
       case 'scan_complete':
+        if (msg.error) {
+          this.state.status = 'idle';
+          this.state.current_path = '';
+          if (msg.scan_type) this.state.scan_type = msg.scan_type;
+          this.updateButtons();
+          this.updateNav();
+          this.updateHeroStatus();
+          this.showToast('Scan failed: ' + msg.error, 'error');
+          break;
+        }
         this.state.status = 'complete';
         this.state.current_path = '';
         if (msg.scan_type) this.state.scan_type = msg.scan_type;
@@ -255,6 +446,7 @@ const App = {
         this.restoreDecisions();
         if (Object.keys(this.decisions).length === 0) this.autoSuggestDecisions();
         this.loadSessions();
+        this.refreshDevInventory();
         {
           const nFind = this.state.findings.length;
           const nPat = (this.state.pattern_totals || []).length;
@@ -290,6 +482,9 @@ const App = {
     this._vaultAuthLastReason = msg.reason || '';
     this._vaultAuthHydrated = true;
     this.renderVaultStatus();
+
+    if (nextSignedIn) this._clearVaultAuthPoll();
+    else this._syncVaultAuthPoll();
 
     if (!wasSignedIn && nextSignedIn) {
       this._notifyOpSessionConnected();
@@ -342,7 +537,7 @@ const App = {
     const s = this.state.status || 'idle';
     pill.className = 'status-pill ' + (s === 'running' ? 'running' : s === 'complete' ? 'complete' : s === 'stopped' ? 'stopped' : '');
     const st = this.state.scan_type;
-    const typeLabel = st === 'specific_folder' ? 'Folder Scan' : 'Machine Scan';
+    const typeLabel = st === 'archive' ? 'Archive Scan' : st === 'specific_folder' ? 'Folder Scan' : 'Machine Scan';
     if (s === 'running') {
       textEl.textContent = typeLabel + '...';
     } else if (s === 'complete') {
@@ -650,7 +845,7 @@ const App = {
     const revStrip = document.getElementById('reviewCapStrip');
     if (revStrip) delete revStrip.dataset.dismissed;
     const scanType = roots && roots.length ? 'specific_folder' : 'entire_machine';
-    this.state = { status: 'running', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: this.state.file_cap, pattern_totals: [], findings: [], scan_type: scanType, current_path: '' };
+    this.state = { status: 'running', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: this.state.file_cap, pattern_totals: [], findings: [], dev_inventory: [], scan_type: scanType, current_path: '' };
     this.decisions = {};
     this._patternEls = {};
     const patEl = document.getElementById('patterns');
@@ -770,6 +965,77 @@ const App = {
     this.startScan([path]);
   },
 
+  showArchivePicker() {
+    const picker = document.getElementById('archivePicker');
+    if (!picker) return;
+    picker.style.display = '';
+    const input = document.getElementById('archivePath');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+  },
+
+  hideArchivePicker() {
+    const picker = document.getElementById('archivePicker');
+    if (picker) picker.style.display = 'none';
+  },
+
+  async startArchiveScan() {
+    const path = ((document.getElementById('archivePath') || {}).value || '').trim();
+    if (!path) {
+      this.showToast('Enter the path to a .zip archive.', 'info');
+      return;
+    }
+    this.hideArchivePicker();
+    this.lastScanCapped = false;
+    this._capBannerDismissed = false;
+    const capB = document.getElementById('freeTierCapBanner');
+    if (capB) capB.style.display = 'none';
+    const revStrip = document.getElementById('reviewCapStrip');
+    if (revStrip) delete revStrip.dataset.dismissed;
+    this.state = { status: 'running', dirs_visited: 0, candidates_queued: 0, files_scanned: 0, hits_total: 0, progress_denominator: 1, file_cap: this.state.file_cap, pattern_totals: [], findings: [], dev_inventory: [], scan_type: 'archive', current_path: '' };
+    this.decisions = {};
+    this._patternEls = {};
+    const patEl = document.getElementById('patterns');
+    if (patEl) patEl.innerHTML = '<div class="empty-msg">Scanning archive...</div>';
+    const treeEl = document.getElementById('findingsTree');
+    if (treeEl) treeEl.innerHTML = '<div class="empty-msg" style="padding:16px;font-size:.78rem">Waiting for findings...</div>';
+    const graphEl = document.getElementById('patternGraph');
+    if (graphEl) graphEl.innerHTML = '<div class="empty-msg">Scanning archive...</div>';
+    this.updateDashboard(); this.updateButtons(); this.updateNav();
+    try {
+      let resp = await fetch('/api/scan/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archive_path: path }),
+      });
+      if (resp.status === 409) {
+        await fetch('/api/scan/stop', { method: 'POST' });
+        await new Promise(r => setTimeout(r, 500));
+        resp = await fetch('/api/scan/archive', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ archive_path: path }),
+        });
+      }
+      const r = await resp.json();
+      if (r.sessionId) this.sessionId = r.sessionId;
+      if (r.error || !resp.ok) {
+        this.state.status = 'idle';
+        this.updateButtons();
+        this.updateNav();
+        this.showToast('Archive scan failed: ' + (r.error || resp.statusText), 'error');
+      }
+    } catch (err) {
+      console.error('Start archive scan failed', err);
+      this.state.status = 'idle';
+      this.updateButtons();
+      this.updateNav();
+      this.showToast('Archive scan failed.', 'error');
+    }
+  },
+
   async stopScan() {
     try { await fetch('/api/scan/stop', { method: 'POST' }); } catch (err) {}
     this.state.status = 'stopped';
@@ -823,6 +1089,89 @@ const App = {
     if (s.status === 'complete' || s.status === 'stopped') {
       this.renderFindingsTree();
     }
+    this.renderDevInventory();
+  },
+
+  ideHostLabel(host) {
+    const labels = {
+      vscode: 'VS Code',
+      'vscode-insiders': 'VS Code Insiders',
+      cursor: 'Cursor',
+      windsurf: 'Windsurf',
+      vscodium: 'VSCodium',
+      intellij: 'IntelliJ IDEA',
+      pycharm: 'PyCharm',
+      webstorm: 'WebStorm',
+      goland: 'GoLand',
+      rider: 'Rider',
+      clion: 'CLion',
+      phpstorm: 'PhpStorm',
+      rubymine: 'RubyMine',
+      datagrip: 'DataGrip',
+      'jetbrains-aqua': 'JetBrains Aqua',
+      jetbrains: 'JetBrains IDE',
+      'android-studio': 'Android Studio',
+      'visual-studio': 'Visual Studio',
+      eclipse: 'Eclipse',
+      'eclipse-portable': 'Eclipse (portable)',
+    };
+    return labels[host] || host || 'unknown';
+  },
+
+  async refreshDevInventory() {
+    try {
+      const s = await (await fetch('/api/scan/state')).json();
+      if (Array.isArray(s.dev_inventory)) this.state.dev_inventory = s.dev_inventory;
+    } catch (e) { /* keep cached rows */ }
+    this.renderDevInventory();
+  },
+
+  renderDevInventory() {
+    const card = document.getElementById('devInventoryCard');
+    const body = document.getElementById('devInventoryBody');
+    const badge = document.getElementById('devInvBadge');
+    if (!card || !body) return;
+    const items = this.state.dev_inventory || [];
+    if (badge) badge.textContent = String(items.length);
+    if (!items.length) {
+      card.style.display = 'none';
+      body.innerHTML = '<div class="empty-msg">Run a scan to inventory MCP configs and IDE plugins.</div>';
+      return;
+    }
+    card.style.display = '';
+    const mcp = items.filter(i => i.kind === 'mcp_server');
+    const ext = items.filter(i => i.kind === 'editor_extension');
+    const section = (title, rows, rowFn) => {
+      if (!rows.length) return '';
+      let h = `<div style="margin-bottom:14px"><div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;font-weight:600">${title} <span class="badge">${rows.length}</span></div>`;
+      h += '<div style="display:flex;flex-direction:column;gap:6px">';
+      rows.slice(0, 80).forEach(r => { h += rowFn(r); });
+      if (rows.length > 80) {
+        h += `<div style="font-size:.78rem;color:var(--muted);padding:4px 0">+ ${rows.length - 80} more not shown</div>`;
+      }
+      h += '</div></div>';
+      return h;
+    };
+    let html = '';
+    html += section('MCP servers', mcp, r =>
+      `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:.86rem">${this.esc(r.id)}</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:2px">${this.esc(r.name || r.requested_spec || r.command || '')}</div>
+        </div>
+        <span style="font-size:.7rem;color:var(--c-slate);white-space:nowrap">${this.esc(r.transport || '')}</span>
+      </div>`
+    );
+    html += section('IDE plugins', ext, r =>
+      `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:.86rem">${this.esc(r.name || r.id)}</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:2px;font-family:ui-monospace,monospace">${this.esc(r.id)} @ ${this.esc(r.version || '?')}</div>
+        </div>
+        <span style="font-size:.7rem;color:var(--accent);white-space:nowrap">${this.esc(this.ideHostLabel(r.host))}</span>
+      </div>`
+    );
+    body.innerHTML = html || '<div class="empty-msg">No inventory rows.</div>';
   },
 
   renderSeverityDonut() {
@@ -1408,9 +1757,13 @@ const App = {
       const r = await (await fetch('/api/vaults/auth-status' + q)).json();
       this.opSignedIn = (r.vault_connected !== undefined) ? !!r.vault_connected : !!r.onepassword_signed_in;
       this._vaultAuthLastState = r.state || (this.opSignedIn ? 'signed_in' : 'signed_out');
+      this.opAuthHint = r.hint || '';
+      this.opAuthIssue = r.issue || '';
+      if (typeof r.macos_app_bundle === 'boolean') this.macosAppBundle = r.macos_app_bundle;
     } catch (e) {}
     this._vaultAuthHydrated = true;
     if (!wasSignedIn && this.opSignedIn) {
+      this._clearVaultAuthPoll();
       this._notifyOpSessionConnected();
       try {
         // On every first-transition to signedIn we deep-check Vee keys.
@@ -1506,6 +1859,36 @@ const App = {
     return `<a href="${this.esc(u)}" target="_blank" rel="noopener noreferrer" class="vault-vendor-link" onclick="event.stopPropagation()">Official install page \u2197</a>`;
   },
 
+  async openOpDeveloperSettings() {
+    try {
+      await fetch('/api/vaults/op-developer-settings', { method: 'POST' });
+      this.showToast('Opened 1Password Developer settings — enable CLI integration and check CLI activity.', 'info');
+    } catch (e) {
+      this.showToast('Could not open 1Password settings. Open 1Password → Settings → Developer manually.', 'warning');
+    }
+  },
+
+  _renderOpLockedActions() {
+    const issue = this.opAuthIssue || '';
+    const opening = this._vaultAuthLastState === 'opening';
+    let hint = this.opAuthHint || (opening
+      ? 'Waiting for 1Password CLI authorization… approve the Vaultify prompt if you see one.'
+      : '1Password is open but the CLI is not connected yet.');
+    if (!this.macosAppBundle) {
+      hint += ' Launch Vaultify from Applications → Vaultify (Finder or Spotlight), not by running the raw binary in Terminal.';
+    }
+    let buttons = '';
+    if (issue === 'cli_integration_disabled' || issue === 'desktop_unresponsive' || issue === 'unknown' || issue === 'timeout') {
+      buttons += `<button type="button" class="tb-btn" onclick="event.stopPropagation();App.openOpDeveloperSettings()" style="font-size:.58rem;padding:4px 8px;width:100%;margin-bottom:4px">Enable CLI in 1Password</button>`;
+      buttons += `<button type="button" class="tb-btn" onclick="event.stopPropagation();App.openOpDeveloperSettings()" style="font-size:.58rem;padding:4px 8px;width:100%;margin-bottom:4px">View CLI activity</button>`;
+    }
+    buttons += `<button type="button" class="tb-btn" onclick="event.stopPropagation();App.openVault()" style="font-size:.58rem;padding:4px 8px;border-color:var(--ok);color:var(--ok);width:100%;display:inline-flex;align-items:center;justify-content:center;gap:6px">
+      <img src="/assets/vaultify_logo.png" alt="" width="14" height="14" style="border-radius:3px" decoding="async">
+      Connect Vaultify to 1Password
+    </button>`;
+    return `${buttons}<span id="signInMsg" style="font-size:.55rem;color:var(--muted);display:block;margin-top:6px;line-height:1.45">${this.esc(hint)}</span>`;
+  },
+
   renderVaultStatus() {
     const grid = document.getElementById('sidebarVaultGrid');
     if (!grid) return;
@@ -1548,10 +1931,12 @@ const App = {
             <span id="installOpMsg" style="font-size:.55rem;color:var(--muted);display:block;margin-top:4px"></span>`;
       } else if (this.opSignedIn) {
         statusHtml = '<span style="color:var(--ok)">\u2713 Connected</span>';
+      } else if (this._vaultAuthLastState === 'opening') {
+        statusHtml = '<span style="color:var(--accent)">Connecting\u2026</span>';
+        actionsHtml = this._renderOpLockedActions();
       } else {
-        statusHtml = '<span style="color:var(--warn)">Locked</span>';
-        actionsHtml = `<button class="tb-btn" onclick="event.stopPropagation();App.openVault()" style="font-size:.58rem;padding:4px 8px;border-color:var(--ok);color:var(--ok);width:100%">Open Vault</button>
-            <span id="signInMsg" style="font-size:.55rem;color:var(--muted);display:block;margin-top:4px">Unlock 1Password</span>`;
+        statusHtml = '<span style="color:var(--warn)">CLI not connected</span>';
+        actionsHtml = this._renderOpLockedActions();
       }
     } else if (v.installed) {
       statusHtml = '<span style="color:var(--ok)">On PATH</span><div style="font-size:.55rem;color:var(--muted);margin-top:4px">Vault apply: use 1Password for now</div>';
@@ -1619,6 +2004,8 @@ const App = {
       if (msg) {
         msg.innerHTML = '<span style="color:var(--accent)">Unlock 1Password if it prompted you. Vaultify will update the moment the CLI connects.</span>';
       }
+      this._syncVaultAuthPoll();
+      void this.refreshVaultAuthUI(true);
     } catch (e) {
       const detail = (e && (e.message || String(e))) ? this.esc(String(e.message || e)) : '';
       const hint = detail ? ` ${detail}` : '';
@@ -1743,9 +2130,11 @@ const App = {
         this.state.hits_total = session.findings.length;
         this.state.status = 'complete';
         this.sessionId = sessionId;
+        if (Array.isArray(session.dev_inventory)) this.state.dev_inventory = session.dev_inventory;
         this.updatePatternTotals();
         this.decisions = {};
         this.restoreDecisions();
+        this.renderDevInventory();
         this.navigate('review');
       }
     } catch (err) { console.warn('Load session failed', err); }
@@ -1927,6 +2316,88 @@ const App = {
 
   reviewPage: 0,
   REVIEW_PAGE_SIZE: 20,
+
+  _csvCell(v) {
+    if (v == null) return '';
+    const s = String(v);
+    if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  },
+
+  downloadCSV(filename, headers, rows) {
+    const lines = [headers.map(h => this._csvCell(h)).join(',')];
+    rows.forEach(r => lines.push(r.map(c => this._csvCell(c)).join(',')));
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  exportReviewCSV() {
+    const groups = this.getGroups();
+    if (!groups.length) {
+      this.showToast('No findings to export. Run a scan first.', 'info');
+      return;
+    }
+    const headers = ['pattern_id', 'severity', 'description', 'match_sha256', 'redacted_preview', 'decision', 'good_practice', 'group_file_count', 'relative_path', 'full_path', 'line_number', 'entropy', 'detection_layer', 'session_id'];
+    const rows = [];
+    const sid = this.sessionId || '';
+    groups.forEach(g => {
+      const d = this.decisions[g.hash];
+      let decision = 'pending';
+      let gp = false;
+      if (d) {
+        gp = !!d.good_practice;
+        if (gp) decision = 'good_practice';
+        else decision = d.action === 'dismiss' ? 'graveyard' : (d.action || 'pending');
+      }
+      g.locs.forEach(loc => {
+        rows.push([
+          g.pattern_id || '',
+          g.severity || '',
+          g.description || '',
+          g.hash || '',
+          g.redacted_preview || '',
+          decision,
+          gp ? 'yes' : 'no',
+          g.locs.length,
+          loc.relative_path || '',
+          loc.full_path || '',
+          loc.line_number != null ? loc.line_number : '',
+          loc.entropy != null ? Number(loc.entropy).toFixed(2) : '',
+          loc.detection_layer || '',
+          sid,
+        ]);
+      });
+    });
+    const tag = sid ? sid.slice(0, 8) : 'review';
+    const ts = new Date().toISOString().slice(0, 10);
+    this.downloadCSV(`vaultify-review-${tag}-${ts}.csv`, headers, rows);
+    this.showToast(`Exported ${rows.length} row(s) to CSV.`, 'success');
+  },
+
+  async exportAuditCSV() {
+    try {
+      const entries = await (await fetch('/api/audit')).json();
+      if (!Array.isArray(entries) || !entries.length) {
+        this.showToast('No audit entries to export yet.', 'info');
+        return;
+      }
+      const headers = ['timestamp', 'level', 'action', 'session_id', 'detail'];
+      const rows = entries.map(e => [e.timestamp || '', e.level || '', e.action || '', e.session_id || '', e.detail || '']);
+      const ts = new Date().toISOString().slice(0, 10);
+      this.downloadCSV(`vaultify-audit-${ts}.csv`, headers, rows);
+      this.showToast(`Exported ${rows.length} audit entries.`, 'success');
+    } catch (e) {
+      console.warn('Audit export failed', e);
+      this.showToast('Failed to export audit trail.', 'error');
+    }
+  },
 
   toggleReviewSort(col) {
     if (this.reviewSort.col === col) this.reviewSort.dir *= -1;
@@ -2200,7 +2671,7 @@ const App = {
     // are both required server-side. Bail out cleanly if either is
     // missing so a stale row-click after a reset can't fire a 400.
     const hexHash = /^[0-9a-f]{64}$/.test(String(hash || ''));
-    const hexSid = /^[0-9a-f]{16}$/.test(String(this.state.sessionId || ''));
+    const hexSid = /^[0-9a-f]{16}$/.test(String(this.sessionId || ''));
     if (!hexHash || !hexSid || !validatorID) {
       this._showToast('Cannot check this row: stale or missing session.');
       return;
@@ -2218,7 +2689,7 @@ const App = {
       const r = await fetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: this.state.sessionId, match_sha256: hash }),
+        body: JSON.stringify({ session_id: this.sessionId, match_sha256: hash }),
       });
       if (r.status === 402) {
         const body = await r.json().catch(() => ({}));
@@ -2261,7 +2732,7 @@ const App = {
       const r = await fetch('/api/validate/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: this.state.sessionId, match_sha256s: [] }),
+        body: JSON.stringify({ session_id: this.sessionId, match_sha256s: [] }),
       });
       if (r.status === 402) {
         const body = await r.json().catch(() => ({}));
@@ -2283,7 +2754,7 @@ const App = {
       const r = await fetch('/api/playbook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: this.state.sessionId, match_sha256s: [] }),
+        body: JSON.stringify({ session_id: this.sessionId, match_sha256s: [] }),
       });
       if (r.status === 402) {
         const body = await r.json().catch(() => ({}));
@@ -2301,9 +2772,9 @@ const App = {
   // _refreshSessionForRow reloads the current session detail so chips
   // and recommendations reflect the latest cache.
   async _refreshSessionForRow() {
-    if (!this.state.sessionId) return;
+    if (!this.sessionId) return;
     try {
-      const detail = await (await fetch('/api/sessions/' + this.state.sessionId)).json();
+      const detail = await (await fetch('/api/sessions/' + this.sessionId)).json();
       this.state.findings = detail.findings || [];
       this.renderReview();
     } catch (_) {}
@@ -2920,6 +3391,9 @@ const App = {
         html += '</div></div>';
         return html;
       }).join('');
+
+      void this.checkForUpdates(false);
+      this.renderUpgradeCard();
     } catch (e) {}
   },
 
@@ -3459,18 +3933,18 @@ const App = {
   // =====================================================================
 
   DEMO_FINDINGS: [
-    { pattern_id: 'aws_access_key_id', severity: 'critical', description: 'AWS Access Key ID', root: 'C:\\Users\\demo', relative_path: 'projects\\backend\\.env', full_path: 'C:\\Users\\demo\\projects\\backend\\.env', line_number: 3, match_sha256: 'demo_sha_001', redacted_preview: 'AKIA5R...XMPL', line_snippet: 'AWS_ACCESS_KEY_ID=AKIA5REXAMPLE1234', value: 'AKIA5REXAMPLE1234' },
-    { pattern_id: 'aws_access_key_id', severity: 'critical', description: 'AWS Access Key ID', root: 'C:\\Users\\demo', relative_path: 'scripts\\deploy.ps1', full_path: 'C:\\Users\\demo\\scripts\\deploy.ps1', line_number: 17, match_sha256: 'demo_sha_002', redacted_preview: 'AKIA9Q...DEMO', line_snippet: '$accessKey = "AKIA9QDEMOKEY5678"', value: 'AKIA9QDEMOKEY5678' },
-    { pattern_id: 'gh_pat_classic', severity: 'high', description: 'GitHub Personal Access Token (Classic)', root: 'C:\\Users\\demo', relative_path: 'dev\\automation\\github-sync.js', full_path: 'C:\\Users\\demo\\dev\\automation\\github-sync.js', line_number: 8, match_sha256: 'demo_sha_003', redacted_preview: 'ghp_Xk...9mRt', line_snippet: 'const token = "ghp_XkDemoToken9mRt"', value: 'ghp_XkDemoToken9mRt1234567890abcdef' },
-    { pattern_id: 'gh_pat_fine', severity: 'high', description: 'GitHub Fine-Grained PAT', root: 'C:\\Users\\demo', relative_path: 'dev\\ci\\.github-token', full_path: 'C:\\Users\\demo\\dev\\ci\\.github-token', line_number: 1, match_sha256: 'demo_sha_004', redacted_preview: 'github_pat_11A...F4kE', line_snippet: 'github_pat_11ADEMOTOKEN_F4kE', value: 'github_pat_11ADEMOTOKEN_F4kE' },
-    { pattern_id: 'slack_bot', severity: 'high', description: 'Slack Bot Token', root: 'C:\\Users\\demo', relative_path: 'projects\\chatbot\\config.json', full_path: 'C:\\Users\\demo\\projects\\chatbot\\config.json', line_number: 12, match_sha256: 'demo_sha_005', redacted_preview: 'xoxb-1...dEmO', line_snippet: '"token": "xoxb-1234-5678-dEmOsLaCk"', value: 'xoxb-1234-5678-dEmOsLaCk' },
-    { pattern_id: 'openai_project', severity: 'high', description: 'OpenAI Project API Key', root: 'C:\\Users\\demo', relative_path: 'dev\\ai-tools\\.env.local', full_path: 'C:\\Users\\demo\\dev\\ai-tools\\.env.local', line_number: 2, match_sha256: 'demo_sha_006', redacted_preview: 'sk-proj-Dm...oKEy', line_snippet: 'OPENAI_API_KEY=sk-proj-DmExAmPlEoKEy', value: 'sk-proj-DmExAmPlEoKEy' },
-    { pattern_id: 'stripe_secret', severity: 'critical', description: 'Stripe Secret Key', root: 'C:\\Users\\demo', relative_path: 'projects\\store\\server.js', full_path: 'C:\\Users\\demo\\projects\\store\\server.js', line_number: 5, match_sha256: 'demo_sha_007', redacted_preview: 'sk_live_51...dEmO', line_snippet: 'const stripe = require("stripe")("sk_live_51DeMoStRiPeKeY")', value: 'sk_live_51DeMoStRiPeKeY' },
-    { pattern_id: 'anthropic_api', severity: 'high', description: 'Anthropic API Key', root: 'C:\\Users\\demo', relative_path: 'dev\\ai-tools\\claude-config.yml', full_path: 'C:\\Users\\demo\\dev\\ai-tools\\claude-config.yml', line_number: 4, match_sha256: 'demo_sha_008', redacted_preview: 'sk-ant-...xMpL', line_snippet: 'api_key: sk-ant-dEmOkEyExMpL', value: 'sk-ant-dEmOkEyExMpL' },
-    { pattern_id: 'telegram_bot', severity: 'medium', description: 'Telegram Bot Token', root: 'C:\\Users\\demo', relative_path: 'scripts\\notify-bot.py', full_path: 'C:\\Users\\demo\\scripts\\notify-bot.py', line_number: 11, match_sha256: 'demo_sha_009', redacted_preview: '71234...DeMo', line_snippet: 'BOT_TOKEN = "7123456789:AAFdEmOtOkEn"', value: '7123456789:AAFdEmOtOkEn' },
-    { pattern_id: 'sendgrid', severity: 'medium', description: 'SendGrid API Key', root: 'C:\\Users\\demo', relative_path: 'projects\\mailer\\.env', full_path: 'C:\\Users\\demo\\projects\\mailer\\.env', line_number: 7, match_sha256: 'demo_sha_010', redacted_preview: 'SG.dEm...oKeY', line_snippet: 'SENDGRID_API_KEY=SG.dEmOsEnDgRiDkEy.oKeY', value: 'SG.dEmOsEnDgRiDkEy.oKeY' },
-    { pattern_id: 'google_api_key', severity: 'medium', description: 'Google API Key', root: 'C:\\Users\\demo', relative_path: 'dev\\maps-app\\config.ts', full_path: 'C:\\Users\\demo\\dev\\maps-app\\config.ts', line_number: 9, match_sha256: 'demo_sha_011', redacted_preview: 'AIzaSy...dEmO', line_snippet: 'export const MAPS_KEY = "AIzaSyDeMoGoOgLeKeY"', value: 'AIzaSyDeMoGoOgLeKeY' },
-    { pattern_id: 'npm_token', severity: 'medium', description: 'npm Access Token', root: 'C:\\Users\\demo', relative_path: '.npmrc', full_path: 'C:\\Users\\demo\\.npmrc', line_number: 1, match_sha256: 'demo_sha_012', redacted_preview: 'npm_Dm...eXmP', line_snippet: '//registry.npmjs.org/:_authToken=npm_DmExMpLeToKeN', value: 'npm_DmExMpLeToKeN' },
+    { pattern_id: 'aws_access_key_id', severity: 'critical', description: 'AWS Access Key ID', root: 'C:\\Users\\demo', relative_path: 'projects\\backend\\.env', full_path: 'C:\\Users\\demo\\projects\\backend\\.env', line_number: 3, match_sha256: 'demo_sha_001', redacted_preview: 'AKIA5R...XMPL', line_snippet: 'AWS_ACCESS_KEY_ID=__VAULTIFY_DEMO_AWS__', value: '__VAULTIFY_DEMO_AWS__' },
+    { pattern_id: 'aws_access_key_id', severity: 'critical', description: 'AWS Access Key ID', root: 'C:\\Users\\demo', relative_path: 'scripts\\deploy.ps1', full_path: 'C:\\Users\\demo\\scripts\\deploy.ps1', line_number: 17, match_sha256: 'demo_sha_002', redacted_preview: 'AKIA9Q...DEMO', line_snippet: '$accessKey = "__VAULTIFY_DEMO_AWS__"', value: '__VAULTIFY_DEMO_AWS__' },
+    { pattern_id: 'gh_pat_classic', severity: 'high', description: 'GitHub Personal Access Token (Classic)', root: 'C:\\Users\\demo', relative_path: 'dev\\automation\\github-sync.js', full_path: 'C:\\Users\\demo\\dev\\automation\\github-sync.js', line_number: 8, match_sha256: 'demo_sha_003', redacted_preview: 'ghp_Xk...9mRt', line_snippet: 'const token = "__VAULTIFY_DEMO_GH_CLASSIC__"', value: '__VAULTIFY_DEMO_GH_CLASSIC__' },
+    { pattern_id: 'gh_pat_fine', severity: 'high', description: 'GitHub Fine-Grained PAT', root: 'C:\\Users\\demo', relative_path: 'dev\\ci\\.github-token', full_path: 'C:\\Users\\demo\\dev\\ci\\.github-token', line_number: 1, match_sha256: 'demo_sha_004', redacted_preview: 'github_pat_11A...F4kE', line_snippet: '__VAULTIFY_DEMO_GH_FINE__', value: '__VAULTIFY_DEMO_GH_FINE__' },
+    { pattern_id: 'slack_bot', severity: 'high', description: 'Slack Bot Token', root: 'C:\\Users\\demo', relative_path: 'projects\\chatbot\\config.json', full_path: 'C:\\Users\\demo\\projects\\chatbot\\config.json', line_number: 12, match_sha256: 'demo_sha_005', redacted_preview: 'xoxb-1...dEmO', line_snippet: '"token": "__VAULTIFY_DEMO_SLACK__"', value: '__VAULTIFY_DEMO_SLACK__' },
+    { pattern_id: 'openai_project', severity: 'high', description: 'OpenAI Project API Key', root: 'C:\\Users\\demo', relative_path: 'dev\\ai-tools\\.env.local', full_path: 'C:\\Users\\demo\\dev\\ai-tools\\.env.local', line_number: 2, match_sha256: 'demo_sha_006', redacted_preview: 'sk-proj-Dm...oKEy', line_snippet: 'OPENAI_API_KEY=__VAULTIFY_DEMO_OPENAI__', value: '__VAULTIFY_DEMO_OPENAI__' },
+    { pattern_id: 'stripe_secret', severity: 'critical', description: 'Stripe Secret Key', root: 'C:\\Users\\demo', relative_path: 'projects\\store\\server.js', full_path: 'C:\\Users\\demo\\projects\\store\\server.js', line_number: 5, match_sha256: 'demo_sha_007', redacted_preview: 'sk_live_51...dEmO', line_snippet: 'const stripe = require("stripe")("__VAULTIFY_DEMO_STRIPE__")', value: '__VAULTIFY_DEMO_STRIPE__' },
+    { pattern_id: 'anthropic_api', severity: 'high', description: 'Anthropic API Key', root: 'C:\\Users\\demo', relative_path: 'dev\\ai-tools\\claude-config.yml', full_path: 'C:\\Users\\demo\\dev\\ai-tools\\claude-config.yml', line_number: 4, match_sha256: 'demo_sha_008', redacted_preview: 'sk-ant-...xMpL', line_snippet: 'api_key: __VAULTIFY_DEMO_ANTHROPIC__', value: '__VAULTIFY_DEMO_ANTHROPIC__' },
+    { pattern_id: 'telegram_bot', severity: 'medium', description: 'Telegram Bot Token', root: 'C:\\Users\\demo', relative_path: 'scripts\\notify-bot.py', full_path: 'C:\\Users\\demo\\scripts\\notify-bot.py', line_number: 11, match_sha256: 'demo_sha_009', redacted_preview: '71234...DeMo', line_snippet: 'BOT_TOKEN = "__VAULTIFY_DEMO_TELEGRAM__"', value: '__VAULTIFY_DEMO_TELEGRAM__' },
+    { pattern_id: 'sendgrid', severity: 'medium', description: 'SendGrid API Key', root: 'C:\\Users\\demo', relative_path: 'projects\\mailer\\.env', full_path: 'C:\\Users\\demo\\projects\\mailer\\.env', line_number: 7, match_sha256: 'demo_sha_010', redacted_preview: 'SG.dEm...oKeY', line_snippet: 'SENDGRID_API_KEY=__VAULTIFY_DEMO_SENDGRID__', value: '__VAULTIFY_DEMO_SENDGRID__' },
+    { pattern_id: 'google_api_key', severity: 'medium', description: 'Google API Key', root: 'C:\\Users\\demo', relative_path: 'dev\\maps-app\\config.ts', full_path: 'C:\\Users\\demo\\dev\\maps-app\\config.ts', line_number: 9, match_sha256: 'demo_sha_011', redacted_preview: 'AIzaSy...dEmO', line_snippet: 'export const MAPS_KEY = "__VAULTIFY_DEMO_GOOGLE__"', value: '__VAULTIFY_DEMO_GOOGLE__' },
+    { pattern_id: 'npm_token', severity: 'medium', description: 'npm Access Token', root: 'C:\\Users\\demo', relative_path: '.npmrc', full_path: 'C:\\Users\\demo\\.npmrc', line_number: 1, match_sha256: 'demo_sha_012', redacted_preview: 'npm_Dm...eXmP', line_snippet: '//registry.npmjs.org/:_authToken=__VAULTIFY_DEMO_NPM__', value: '__VAULTIFY_DEMO_NPM__' },
   ],
 
   async simulateDemoScan() {

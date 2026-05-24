@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/vaultify/vaultify/internal/paths"
 )
 
 type Finding struct {
@@ -260,6 +262,7 @@ var contextLowTrustPathFragments = []string{
 	"/coverage/", "/.next/", "/.nuget/", "/node_modules/", "/bower_components/",
 	"/.pnpm-store/", "/.yarn/", "/vendor/bundle/", "/gopath/pkg/",
 	"/openclaw", "/.gem/", "/.bundle/",
+	"/go-sdk/", "/internal/web/assets/",
 }
 
 func isContextExampleOrTemplateFile(fp string) bool {
@@ -271,6 +274,43 @@ func isContextExampleOrTemplateFile(fp string) bool {
 		}
 	}
 	if strings.HasSuffix(base, ".env.example") || strings.HasSuffix(base, ".env.sample") {
+		return true
+	}
+	return false
+}
+
+func shouldExcludeScanPath(p string) bool {
+	clean, err := filepath.Abs(p)
+	if err != nil {
+		clean = p
+	}
+	for _, prefix := range paths.ExcludeFromScan() {
+		if prefix == "" {
+			continue
+		}
+		if pathUnderPrefix(clean, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathUnderPrefix(p, prefix string) bool {
+	p = filepath.Clean(p)
+	prefix = filepath.Clean(prefix)
+	if p == prefix {
+		return true
+	}
+	sep := string(os.PathSeparator)
+	return strings.HasPrefix(p, prefix+sep)
+}
+
+func shouldSkipScanFile(fp string) bool {
+	if strings.HasSuffix(strings.ToLower(filepath.Base(fp)), "_test.go") {
+		return true
+	}
+	low := filepath.ToSlash(strings.ToLower(fp))
+	if strings.HasSuffix(low, "/internal/scanner/scanner_quality_test.go") {
 		return true
 	}
 	return false
@@ -591,6 +631,9 @@ func (s *Scanner) walkDirChan(ctx context.Context, root, dir string, ch chan<- s
 	if s.maxScanFiles > 0 && int(atomic.LoadInt32(&s.enqueued)) >= s.maxScanFiles {
 		return
 	}
+	if shouldExcludeScanPath(dir) {
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -608,11 +651,14 @@ func (s *Scanner) walkDirChan(ctx context.Context, root, dir string, ch chan<- s
 		name := e.Name()
 		full := filepath.Join(dir, name)
 		if e.IsDir() {
-			if excludeDirs[name] {
+			if excludeDirs[name] || shouldExcludeScanPath(full) {
 				continue
 			}
 			s.walkDirChan(ctx, root, full, ch)
 		} else {
+			if shouldSkipScanFile(full) {
+				continue
+			}
 			ext := filepath.Ext(name)
 			if !scanExtensions[ext] && !scanFilenames[name] && !strings.HasPrefix(name, ".env") {
 				continue

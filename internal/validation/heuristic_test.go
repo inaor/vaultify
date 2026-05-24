@@ -47,7 +47,7 @@ func TestPlaceholderTextIsFake(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := mkFinding("openai_api_key", tc.value, "src/index.ts", "", 4.5, 0.9)
+			f := mkFinding("openai_project", tc.value, "src/index.ts", "", 4.5, 0.9)
 			if status, _ := Classify(f); status != StatusFake {
 				t.Fatalf("expected fake, got %q (value=%q)", status, tc.value)
 			}
@@ -60,7 +60,7 @@ func TestPlaceholderTextIsFake(t *testing.T) {
 // heuristic_valid with the correct validator id.
 func TestRealLookingKeyIsValid(t *testing.T) {
 	value := "sk-proj-" + repeatN("aZ7Q9", 12) // 68 chars, no obvious patterns
-	f := mkFinding("openai_api_key", value, ".env.production", "OPENAI_API_KEY="+value, 4.6, 0.92)
+	f := mkFinding("openai_project", value, ".env.production", "OPENAI_API_KEY="+value, 4.6, 0.92)
 	status, vid := Classify(f)
 	if status != StatusValid {
 		t.Fatalf("status=%q, want %q (score=%.3f)", status, StatusValid, HeuristicScore(f))
@@ -92,8 +92,8 @@ func TestUnsupportedPatternHasNoValidator(t *testing.T) {
 // same value in a comment should score lower than in a .env file.
 func TestCommentLineDownweighted(t *testing.T) {
 	value := "sk-" + repeatN("aZ7Q9", 12)
-	bare := mkFinding("openai_api_key", value, ".env", "OPENAI_API_KEY="+value, 4.5, 0.9)
-	commented := mkFinding("openai_api_key", value, "src/foo.ts", "// example: "+value, 4.5, 0.9)
+	bare := mkFinding("openai_project", value, ".env", "OPENAI_API_KEY="+value, 4.5, 0.9)
+	commented := mkFinding("openai_project", value, "src/foo.ts", "// example: "+value, 4.5, 0.9)
 	if HeuristicScore(bare) <= HeuristicScore(commented) {
 		t.Fatalf("expected bare(.env) score > commented(src), got %.3f vs %.3f",
 			HeuristicScore(bare), HeuristicScore(commented))
@@ -107,7 +107,7 @@ func TestRedactedValueDefersToScore(t *testing.T) {
 	// Empty value with a known validator pattern -> falls through to
 	// score path; with neutral defaults it lands not_validatable
 	// (length_score is low because n=0).
-	f := mkFinding("openai_api_key", "", ".env", "", 4.5, 0.9)
+	f := mkFinding("openai_project", "", ".env", "", 4.5, 0.9)
 	status, _ := Classify(f)
 	if status == StatusFake {
 		t.Fatalf("redacted Finding misclassified as fake")

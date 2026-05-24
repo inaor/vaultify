@@ -31,14 +31,16 @@ const (
 	opItemReadTimeout = 10 * time.Second
 )
 
+// OpVaultListProbeTimeout is the steady-state ceiling for op vault list probes.
+func OpVaultListProbeTimeout() time.Duration { return opVaultListTimeout }
+
 type onePasswordBackend struct{}
 
 func (onePasswordBackend) CLIName() string { return "op" }
 func (onePasswordBackend) Name() string    { return "1Password" }
 
 func (onePasswordBackend) Installed() bool {
-	_, err := exec.LookPath("op")
-	return err == nil
+	return OpInstalled()
 }
 
 func (onePasswordBackend) SupportsSecretApply() bool        { return true }
@@ -215,5 +217,28 @@ func tryOpenOnePasswordDesktop() {
 		}
 	default:
 		_ = exec.Command("xdg-open", "onepassword://").Start()
+	}
+}
+
+const onePasswordDeveloperSettingsURL = "onepassword://settings/developers"
+
+// OnePasswordDeveloperSettingsURL is the deep link to CLI integration + activity.
+func OnePasswordDeveloperSettingsURL() string { return onePasswordDeveloperSettingsURL }
+
+// OpenOnePasswordDeveloperSettings opens 1Password directly on Settings → Developer
+// (CLI integration toggle + CLI activity log).
+func OpenOnePasswordDeveloperSettings() {
+	switch runtime.GOOS {
+	case "windows":
+		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", onePasswordDeveloperSettingsURL)
+		if err := cmd.Start(); err != nil {
+			log.Printf("open 1Password developer settings (windows): %v", err)
+		}
+	case "darwin":
+		if err := exec.Command("open", onePasswordDeveloperSettingsURL).Start(); err != nil {
+			tryOpenOnePasswordDesktop()
+		}
+	default:
+		_ = exec.Command("xdg-open", onePasswordDeveloperSettingsURL).Start()
 	}
 }

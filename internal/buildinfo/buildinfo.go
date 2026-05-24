@@ -7,7 +7,7 @@ import (
 
 // Link-time overrides (defaults suit the open-source build).
 var (
-	BuildVersion    = "0.3.0"
+	BuildVersion    = "0.4.0"
 	MaxScanFilesStr = "0" // "0" = unlimited
 )
 

@@ -173,6 +173,7 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 
 	// ---- scan API ----
 	mux.HandleFunc("POST /api/scan/start", srv.handleScanStart)
+	mux.HandleFunc("POST /api/scan/archive", srv.handleScanArchive)
 	mux.HandleFunc("POST /api/scan/stop", srv.handleScanStop)
 	mux.HandleFunc("GET /api/scan/state", srv.handleScanState)
 	mux.HandleFunc("GET /api/scan/ws", srv.handleScanWebSocket)
@@ -208,6 +209,7 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 			"file_cap": buildinfo.FileCapForAPI(),
 		})
 	})
+	mux.HandleFunc("GET /api/version/check", srv.handleVersionCheck)
 
 	// ---- Vee AI agent ----
 	mux.HandleFunc("POST /api/vee/chat", srv.handleVeeChat)
@@ -227,6 +229,7 @@ func (srv *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/vaults/install-op", srv.handleInstallOp)
 	mux.HandleFunc("GET /api/vaults/auth-status", srv.handleVaultAuthStatus)
 	mux.HandleFunc("POST /api/vaults/signin", srv.handleVaultSignIn)
+	mux.HandleFunc("POST /api/vaults/op-developer-settings", srv.handleOpenOpDeveloperSettings)
 	mux.HandleFunc("GET /api/vaults/list-1p", srv.handleVaultList1P)
 	mux.HandleFunc("POST /api/vaults/create", srv.handleVaultCreate)
 	mux.HandleFunc("GET /api/vaults/selected", srv.handleVaultSelectedGet)
