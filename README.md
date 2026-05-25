@@ -14,6 +14,8 @@
 
 Vaultify scans your machine for potential leaked non-human identities like API keys, tokens, and credentials scattered across config files, IDE settings, and AI tool outputs. It helps you decide what to do with each one — Vaultify it (store in your vault), remove it, or dismiss it — and then does it automatically.
 
+Official website - <a href="https://vaultify.live">https://vaultify.live</a>
+
 *Vaultify isn't collecting keys/tokens or stores them in any shape or form. **However, it doesn't understand if your project needs run-time keys - please be mindful when vaulting NHIs**.*
 
 https://github.com/user-attachments/assets/48795b05-b1b3-4d5b-9d5b-419086a73b69
