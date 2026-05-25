@@ -1,8 +1,8 @@
 <p align="center">
   <img width="240" alt="Vaultify" src="docs/branding/vaultify_stack.png" />
 </p>
-## *Runs locally. Finds plaintext secrets. Move them to your vault in one click.*
 
+## *Runs locally. Finds plaintext secrets. Move them to your vault in one click.*
 <p align="center">
   <a href="https://github.com/inaor/vaultify/releases/latest"><img src="https://img.shields.io/github/v/release/inaor/vaultify?sort=semver&logo=github&label=version" alt="Latest GitHub release" /></a>
   <a href="https://github.com/inaor/vaultify/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/inaor/vaultify?filename=go.mod&logo=go&label=Go" alt="Go version from go.mod" /></a>
