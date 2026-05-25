@@ -1,15 +1,6 @@
-
-
-<<<<<<< HEAD
-<div align="center" style="display:flex; flex-direction:column; align-items:center; gap:6px;">
-<img width="180" height="180" alt="Vaultify logo" src="internal/web/assets/vaultify_logo.png" /><br><img width="400" height="200" alt="Vaultify" src="internal/web/assets/vaultify_logo_long.png"/>
-</div>
-=======
 <p align="center">
   <img width="240" alt="Vaultify" src="docs/branding/vaultify_stack.png" />
 </p>
->>>>>>> 61f015b (README: combine logos into single image for tighter layout)
-
 ## *Runs locally. Finds plaintext secrets. Move them to your vault in one click.*
 
 <p align="center">
